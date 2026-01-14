@@ -1117,7 +1117,7 @@ const App = () => {
   const [compareResult, setCompareResult] = useState(null);
   
   // Chat state
-  const [chatMessages, setChatMessages] = useState([{role: "ai", content: "👋 Hello! I can help with:\n• Creating projects\n• Budget rules\n• Country setup"}]);
+  const [chatMessages, setChatMessages] = useState([{role: "ai", content: "👋 Hi! I'm your SAP Playbook Assistant.\n\nI can help you with:\n• Project creation & WBS setup\n• Budget calculations & approvals\n• Settlement rules & TECO status\n• Country-specific configurations\n• Troubleshooting common issues\n\nJust ask me anything!"}]);
   const [chatInput, setChatInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   
@@ -7716,139 +7716,185 @@ ${auditLines}
             {/* ADMIN MODULE */}
             {phase === "working" && module === "admin" && (
               <div className="max-w-6xl fade-in">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-xl font-bold">Admin Configuration</h2>
-                    <p className="text-slate-500">Manage countries, thresholds, and approval levels</p>
+                {/* Header */}
+                <div className="card mb-6 bg-gradient-to-r from-slate-800 to-slate-900 text-white">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold flex items-center gap-2">
+                        <Icon name="Settings" size={24} /> Admin Configuration
+                      </h2>
+                      <p className="text-slate-300 mt-1">Manage system settings, countries, thresholds, and approval levels</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-3 py-1 rounded-full text-xs ${backendUrl ? "bg-green-500/20 text-green-300" : "bg-amber-500/20 text-amber-300"}`}>
+                        {backendUrl ? "● Online" : "○ Offline"}
+                      </span>
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => callBackend({action: "INIT_CONFIG_SHEETS"}).then(() => alert("Config sheets initialized!"))}
-                    className="btn btn-secondary"
-                  >
-                    <Icon name="Database" size={16} className="mr-2" /> Initialize Sheets
-                  </button>
                 </div>
 
-                {/* Admin Tabs */}
-                <div className="flex gap-2 mb-6 flex-wrap">
-                  {[
-                    {id: "settings", label: "⚙️ Settings", icon: "Settings"},
-                    {id: "deadlines", label: "⏰ Deadlines", icon: "Clock"},
-                    {id: "countries", label: "Countries", icon: "Globe"},
-                    {id: "companyCodes", label: "Company Codes", icon: "Building2"},
-                    {id: "jvCodes", label: "JV Codes", icon: "Users"},
-                    {id: "businessAreas", label: "Business Areas", icon: "Briefcase"},
-                    {id: "budgetClasses", label: "Budget Classes", icon: "Wallet"},
-                    {id: "aucTypes", label: "AUC Types", icon: "Package"},
-                    {id: "localThresholds", label: "Local Thresholds", icon: "AlertTriangle"},
-                    {id: "levelApproval", label: "Level Approval", icon: "Shield"},
-                    {id: "approvers", label: "Approvers", icon: "UserCheck"},
-                    {id: "prerequisites", label: "Prerequisites", icon: "CheckSquare"}
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setAdminTab(tab.id)}
-                      className={`px-4 py-2 rounded-lg flex items-center gap-2 ${adminTab === tab.id ? 'bg-blue-600 text-white' : 'bg-white border hover:bg-slate-50'}`}
-                    >
-                      <Icon name={tab.icon} size={16} />
-                      {tab.label}
-                    </button>
-                  ))}
+                {/* Admin Tabs - Grouped */}
+                <div className="card mb-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* System Settings */}
+                    <div>
+                      <p className="text-xs text-slate-500 font-semibold uppercase mb-2">System</p>
+                      <div className="flex flex-col gap-1">
+                        {[
+                          {id: "settings", label: "Settings", icon: "Settings"},
+                          {id: "deadlines", label: "Deadlines", icon: "Clock"}
+                        ].map(tab => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setAdminTab(tab.id)}
+                            className={`px-3 py-2 rounded-lg flex items-center gap-2 text-left text-sm transition-all ${
+                              adminTab === tab.id 
+                                ? 'bg-blue-600 text-white shadow-md' 
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            <Icon name={tab.icon} size={16} />
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Organization */}
+                    <div>
+                      <p className="text-xs text-slate-500 font-semibold uppercase mb-2">Organization</p>
+                      <div className="flex flex-col gap-1">
+                        {[
+                          {id: "countries", label: "Countries", icon: "Globe"},
+                          {id: "companyCodes", label: "Company Codes", icon: "Building2"},
+                          {id: "jvCodes", label: "JV Codes", icon: "Users"},
+                          {id: "businessAreas", label: "Business Areas", icon: "Briefcase"}
+                        ].map(tab => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setAdminTab(tab.id)}
+                            className={`px-3 py-2 rounded-lg flex items-center gap-2 text-left text-sm transition-all ${
+                              adminTab === tab.id 
+                                ? 'bg-blue-600 text-white shadow-md' 
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            <Icon name={tab.icon} size={16} />
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Finance & Approvals */}
+                    <div>
+                      <p className="text-xs text-slate-500 font-semibold uppercase mb-2">Finance & Approvals</p>
+                      <div className="flex flex-col gap-1">
+                        {[
+                          {id: "budgetClasses", label: "Budget Classes", icon: "Wallet"},
+                          {id: "aucTypes", label: "AUC Types", icon: "Package"},
+                          {id: "localThresholds", label: "Thresholds", icon: "AlertTriangle"},
+                          {id: "levelApproval", label: "Approval Levels", icon: "Shield"},
+                          {id: "approvers", label: "Approvers", icon: "UserCheck"},
+                          {id: "prerequisites", label: "Prerequisites", icon: "CheckSquare"}
+                        ].map(tab => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setAdminTab(tab.id)}
+                            className={`px-3 py-2 rounded-lg flex items-center gap-2 text-left text-sm transition-all ${
+                              adminTab === tab.id 
+                                ? 'bg-blue-600 text-white shadow-md' 
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            <Icon name={tab.icon} size={16} />
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Settings Tab */}
                 {adminTab === "settings" && (
-                  <div className="space-y-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Backend API Configuration */}
                     <div className="card">
-                      <h3 className="font-semibold mb-4">🔌 Backend API Configuration</h3>
-                      <p className="text-slate-600 text-sm mb-4">
-                        Connect to your Google Apps Script backend to enable data persistence, signature tracking, and email notifications.
-                      </p>
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                          <Icon name="Cloud" size={20} className="text-blue-600" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold">Backend Connection</h3>
+                          <p className="text-xs text-slate-500">Google Apps Script API</p>
+                        </div>
+                      </div>
                       
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm font-medium mb-1">Google Apps Script Deployment URL</label>
-                          <div className="flex gap-2">
-                            <input 
-                              type="text"
-                              className="input flex-1"
-                              placeholder="https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"
-                              value={backendUrl}
-                              onChange={e => setBackendUrl(e.target.value)}
-                            />
-                            <button 
-                              onClick={async () => {
-                                if (!backendUrl) {
-                                  alert("Please enter a URL first");
-                                  return;
-                                }
-                                // Just save it directly
-                                localStorage.setItem("sap_playbook_backend_url", backendUrl);
-                                setBackendStatus("connected");
-                                alert("✅ URL saved! Backend connected.");
-                              }}
-                              className="btn btn-primary"
-                            >
-                              <Icon name="Save" size={16} className="mr-1" /> Save URL
-                            </button>
-                          </div>
-                          <p className="text-xs text-slate-500 mt-1">
-                            Paste your Google Apps Script deployment URL and click Save
-                          </p>
+                          <label className="block text-sm font-medium mb-1">Deployment URL</label>
+                          <input 
+                            type="text"
+                            className="input w-full text-sm"
+                            placeholder="https://script.google.com/macros/s/.../exec"
+                            value={backendUrl}
+                            onChange={e => setBackendUrl(e.target.value)}
+                          />
                         </div>
                         
-                        {/* Quick Test Button */}
-                        {backendUrl && (
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={async () => {
-                                try {
-                                  const result = await callBackend({action: "GET_SIGNATURE_STATS"});
-                                  if (result.success) {
-                                    setBackendStatus("connected");
-                                    alert("✅ Backend is working!\n\nStats:\n- Total Forms: " + (result.stats?.totalForms || 0) + "\n- Signed: " + (result.stats?.signedSignatures || 0) + "\n- Pending: " + (result.stats?.pendingSignatures || 0));
-                                  } else {
-                                    alert("⚠️ Backend responded but with error: " + result.error);
-                                  }
-                                } catch (e) {
-                                  setBackendStatus("disconnected");
-                                  alert("❌ Connection failed: " + e.message);
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={async () => {
+                              if (!backendUrl) {
+                                alert("Please enter a URL first");
+                                return;
+                              }
+                              localStorage.setItem("sap_playbook_backend_url", backendUrl);
+                              setBackendStatus("connected");
+                              alert("✅ URL saved!");
+                            }}
+                            className="btn btn-primary btn-sm flex-1"
+                          >
+                            <Icon name="Save" size={14} className="mr-1" /> Save
+                          </button>
+                          <button 
+                            onClick={async () => {
+                              try {
+                                const result = await callBackend({action: "GET_SIGNATURE_STATS"});
+                                if (result.success) {
+                                  setBackendStatus("connected");
+                                  alert("✅ Connected!");
+                                } else {
+                                  alert("⚠️ Error: " + result.error);
                                 }
-                              }}
-                              className="btn btn-success btn-sm"
-                            >
-                              <Icon name="Wifi" size={14} className="mr-1" /> Test Connection
-                            </button>
-                            <button 
-                              onClick={() => {
-                                window.open(backendUrl, '_blank');
-                              }}
-                              className="btn btn-secondary btn-sm"
-                            >
-                              <Icon name="ExternalLink" size={14} className="mr-1" /> Open URL
-                            </button>
-                          </div>
-                        )}
+                              } catch (e) {
+                                setBackendStatus("disconnected");
+                                alert("❌ Failed: " + e.message);
+                              }
+                            }}
+                            className="btn btn-secondary btn-sm"
+                            disabled={!backendUrl}
+                          >
+                            <Icon name="Wifi" size={14} className="mr-1" /> Test
+                          </button>
+                        </div>
                         
-                        <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-50">
-                          <div className={`w-3 h-3 rounded-full ${
+                        <div className={`flex items-center gap-2 p-3 rounded-lg ${
+                          backendStatus === "connected" ? "bg-green-50 text-green-700" :
+                          backendStatus === "disconnected" ? "bg-red-50 text-red-700" :
+                          "bg-slate-50 text-slate-600"
+                        }`}>
+                          <div className={`w-2 h-2 rounded-full ${
                             backendStatus === "connected" ? "bg-green-500" :
                             backendStatus === "disconnected" ? "bg-red-500" :
                             "bg-slate-400"
                           }`} />
-                          <span className="text-sm">
-                            Status: {
-                              backendStatus === "connected" ? "Connected ✓" :
-                              backendStatus === "disconnected" ? "Disconnected ✗" :
-                              "Not tested"
-                            }
+                          <span className="text-sm font-medium">
+                            {backendStatus === "connected" ? "Connected" :
+                             backendStatus === "disconnected" ? "Disconnected" :
+                             "Not configured"}
                           </span>
-                          {backendStatus === "connected" && (
-                            <span className="text-xs text-slate-500 ml-auto">
-                              Data will sync to Google Sheets
-                            </span>
-                          )}
                         </div>
                         
                         {backendUrl && (
@@ -7857,82 +7903,102 @@ ${auditLines}
                               setBackendUrl("");
                               localStorage.removeItem("sap_playbook_backend_url");
                               setBackendStatus("unknown");
-                              alert("Backend URL cleared. App will use offline mode.");
                             }}
-                            className="btn btn-secondary btn-sm"
+                            className="text-sm text-red-500 hover:text-red-700"
                           >
-                            <Icon name="Trash2" size={14} className="mr-1" /> Clear URL
+                            Clear URL
                           </button>
                         )}
                       </div>
                     </div>
                     
-                    {/* Initialize Backend */}
+                    {/* Initialize Sheets */}
                     <div className="card">
-                      <h3 className="font-semibold mb-4">🗄️ Initialize Backend Sheets</h3>
-                      <p className="text-slate-600 text-sm mb-4">
-                        Run these once after deploying your backend to create the required Google Sheets.
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                          <Icon name="Database" size={20} className="text-green-600" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold">Initialize Database</h3>
+                          <p className="text-xs text-slate-500">Create Google Sheets tables</p>
+                        </div>
+                      </div>
+                      
+                      <p className="text-sm text-slate-600 mb-4">
+                        Run these commands once after deploying your backend to create the required sheets.
                       </p>
                       
-                      <div className="flex gap-3 flex-wrap">
+                      <div className="space-y-2">
                         <button 
                           onClick={() => callBackend({action: "INIT_ALL_SHEETS"}).then(r => {
-                            if (r.success) alert("✅ All sheets initialized!");
+                            if (r.success) alert("✅ All sheets created!");
                             else alert("Error: " + r.error);
                           }).catch(e => alert("Failed: " + e.message))}
-                          className="btn btn-success"
+                          className="btn btn-success w-full justify-center"
                           disabled={!backendUrl}
                         >
-                          <Icon name="Database" size={16} className="mr-1" /> Initialize All Sheets
+                          <Icon name="Database" size={16} className="mr-2" /> Initialize All Sheets
                         </button>
-                        <button 
-                          onClick={() => callBackend({action: "INIT_CONFIG_SHEETS"}).then(r => {
-                            if (r.success) alert("✅ Config sheets initialized!");
-                            else alert("Error: " + r.error);
-                          }).catch(e => alert("Failed: " + e.message))}
-                          className="btn btn-secondary"
-                          disabled={!backendUrl}
-                        >
-                          <Icon name="Settings" size={16} className="mr-1" /> Init Config Only
-                        </button>
-                        <button 
-                          onClick={() => callBackend({action: "INIT_SIGNATURE_SHEETS"}).then(r => {
-                            if (r.success) alert("✅ Signature sheets initialized!");
-                            else alert("Error: " + r.error);
-                          }).catch(e => alert("Failed: " + e.message))}
-                          className="btn btn-secondary"
-                          disabled={!backendUrl}
-                        >
-                          <Icon name="PenTool" size={16} className="mr-1" /> Init Signatures Only
-                        </button>
+                        
+                        <div className="grid grid-cols-2 gap-2">
+                          <button 
+                            onClick={() => callBackend({action: "INIT_CONFIG_SHEETS"}).then(r => {
+                              if (r.success) alert("✅ Config sheets created!");
+                              else alert("Error: " + r.error);
+                            }).catch(e => alert("Failed: " + e.message))}
+                            className="btn btn-secondary btn-sm"
+                            disabled={!backendUrl}
+                          >
+                            Config Only
+                          </button>
+                          <button 
+                            onClick={() => callBackend({action: "INIT_SIGNATURE_SHEETS"}).then(r => {
+                              if (r.success) alert("✅ Signature sheets created!");
+                              else alert("Error: " + r.error);
+                            }).catch(e => alert("Failed: " + e.message))}
+                            className="btn btn-secondary btn-sm"
+                            disabled={!backendUrl}
+                          >
+                            Signatures Only
+                          </button>
+                        </div>
                       </div>
                       
                       {!backendUrl && (
-                        <p className="text-amber-600 text-sm mt-3">
-                          ⚠️ Please configure and test the backend URL first
+                        <p className="text-amber-600 text-sm mt-4 flex items-center gap-1">
+                          <Icon name="AlertCircle" size={14} /> Configure backend URL first
                         </p>
                       )}
                     </div>
                     
                     {/* App Info */}
-                    <div className="card bg-slate-50">
-                      <h3 className="font-semibold mb-3">ℹ️ Application Info</h3>
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="text-slate-500">Version</p>
-                          <p className="font-medium">1.0.0</p>
+                    <div className="card lg:col-span-2">
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                          <Icon name="Info" size={20} className="text-purple-600" />
                         </div>
                         <div>
-                          <p className="text-slate-500">Mode</p>
-                          <p className="font-medium">{backendUrl ? "Online" : "Offline"}</p>
+                          <h3 className="font-semibold">Application Info</h3>
+                          <p className="text-xs text-slate-500">System status and details</p>
                         </div>
-                        <div>
-                          <p className="text-slate-500">Country</p>
-                          <p className="font-medium">{selectedCountry?.id || "Australia"}</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="p-3 bg-slate-50 rounded-lg">
+                          <p className="text-xs text-slate-500">Version</p>
+                          <p className="font-semibold">1.0.0</p>
                         </div>
-                        <div>
-                          <p className="text-slate-500">User</p>
-                          <p className="font-medium">{currentUser?.displayName || "Not logged in"}</p>
+                        <div className="p-3 bg-slate-50 rounded-lg">
+                          <p className="text-xs text-slate-500">Mode</p>
+                          <p className="font-semibold">{backendUrl ? "🟢 Online" : "🔴 Offline"}</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-lg">
+                          <p className="text-xs text-slate-500">Country</p>
+                          <p className="font-semibold">{selectedCountry?.flag} {selectedCountry?.id || "Australia"}</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-lg">
+                          <p className="text-xs text-slate-500">User</p>
+                          <p className="font-semibold">{currentUser?.displayName || "Guest"}</p>
                         </div>
                       </div>
                     </div>
@@ -8758,12 +8824,13 @@ ${auditLines}
             )}
           </div>
 
-          {/* AI Advisor Panel */}
+          {/* AI Assistant Panel */}
           <div className="advisor-panel">
-            <div className="p-4 border-b">
+            <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
               <h3 className="font-semibold flex items-center gap-2">
-                <Icon name="Bot" size={18} className="text-blue-600" /> AI Advisor
+                <Icon name="MessageSquare" size={18} className="text-blue-600" /> AI Assistant
               </h3>
+              <p className="text-xs text-slate-500 mt-1">Ask questions about SAP processes</p>
             </div>
             <div className="flex-1 overflow-auto p-4 space-y-3">
               {chatMessages.map((m, i) => (
