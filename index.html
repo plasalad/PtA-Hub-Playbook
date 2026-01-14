@@ -2832,9 +2832,22 @@ ${auditLines}
             ) : (
               <button 
                 onClick={() => setShowLoginModal(true)}
-                className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-sm hover:bg-purple-200"
+                className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 flex items-center gap-1"
               >
-                🎮 Login
+                <Icon name="LogIn" size={14} /> Login
+              </button>
+            )}
+            {currentUser && (
+              <button 
+                onClick={() => {
+                  if (confirm("Log out?")) {
+                    setCurrentUser(null);
+                  }
+                }}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded"
+                title="Logout"
+              >
+                <Icon name="LogOut" size={16} />
               </button>
             )}
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
@@ -6816,31 +6829,71 @@ ${auditLines}
 
             {/* Login Modal */}
             {showLoginModal && (
-              <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-                <div className="bg-gradient-to-br from-purple-900 to-indigo-900 rounded-2xl p-8 w-full max-w-md border-4 border-yellow-400 shadow-[0_0_30px_rgba(234,179,8,0.4)]">
+              <div 
+                className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) setShowLoginModal(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setShowLoginModal(false);
+                }}
+                tabIndex={0}
+                ref={(el) => el && el.focus()}
+              >
+                <div className="relative bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 w-full max-w-md border border-slate-600 shadow-2xl">
+                  {/* Close Button */}
+                  <button 
+                    onClick={() => setShowLoginModal(false)}
+                    className="absolute top-4 right-4 text-slate-400 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-700"
+                  >
+                    ✕
+                  </button>
+                  
                   <div className="text-center mb-6">
-                    <h3 className="text-2xl font-bold text-yellow-400" style={{textShadow: "2px 2px 0 #7c3aed"}}>🎮 LOGIN</h3>
-                    <p className="text-purple-300 text-sm mt-1">Enter the SAP Quest Arena!</p>
+                    <h3 className="text-2xl font-bold text-white">🔐 Login to SAP Playbook</h3>
+                    <p className="text-slate-400 text-sm mt-1">Access all features and track your progress</p>
                   </div>
                   
                   <div className="space-y-4">
                     <div>
-                      <label className="text-purple-300 text-sm mb-1 block">Username</label>
+                      <label className="text-slate-300 text-sm mb-1 block">Username</label>
                       <input 
-                        className="w-full p-3 bg-purple-800 text-white rounded-lg border-2 border-purple-600 focus:border-yellow-400 outline-none"
+                        className="w-full p-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-blue-400 outline-none"
                         placeholder="Enter username"
                         value={loginForm.username}
                         onChange={e => setLoginForm({...loginForm, username: e.target.value})}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const user = users.find(u => u.username === loginForm.username && u.password === loginForm.password);
+                            if (user) {
+                              setCurrentUser(user);
+                              setShowLoginModal(false);
+                              setLoginForm({username: "", password: ""});
+                            }
+                          }
+                        }}
                       />
                     </div>
                     <div>
-                      <label className="text-purple-300 text-sm mb-1 block">Password</label>
+                      <label className="text-slate-300 text-sm mb-1 block">Password</label>
                       <input 
-                        className="w-full p-3 bg-purple-800 text-white rounded-lg border-2 border-purple-600 focus:border-yellow-400 outline-none"
+                        className="w-full p-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-blue-400 outline-none"
                         type="password"
                         placeholder="Enter password"
                         value={loginForm.password}
                         onChange={e => setLoginForm({...loginForm, password: e.target.value})}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const user = users.find(u => u.username === loginForm.username && u.password === loginForm.password);
+                            if (user) {
+                              setCurrentUser(user);
+                              setShowLoginModal(false);
+                              setLoginForm({username: "", password: ""});
+                            } else {
+                              alert("Invalid username or password");
+                            }
+                          }
+                        }}
                       />
                     </div>
                     
@@ -6855,10 +6908,16 @@ ${auditLines}
                           alert("Invalid username or password. Try: admin/admin123");
                         }
                       }}
-                      className="w-full py-3 bg-yellow-400 text-purple-900 font-bold rounded-lg hover:bg-yellow-300 border-b-4 border-yellow-600 active:border-b-0 active:translate-y-1"
+                      className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-500"
                     >
-                      🚀 START GAME
+                      Login
                     </button>
+                    
+                    <div className="relative flex items-center py-2">
+                      <div className="flex-grow border-t border-slate-600"></div>
+                      <span className="px-3 text-slate-500 text-sm">or</span>
+                      <div className="flex-grow border-t border-slate-600"></div>
+                    </div>
                     
                     <button
                       onClick={() => {
@@ -6889,22 +6948,16 @@ ${auditLines}
                         setCurrentUser(newUser);
                         setShowLoginModal(false);
                         setLoginForm({username: "", password: ""});
-                        alert("🎉 Account created! You got 50 bonus coins to start!");
+                        alert("🎉 Account created! Welcome to SAP Playbook!");
                       }}
-                      className="w-full py-2 bg-transparent text-purple-300 hover:text-white border-2 border-purple-500 rounded-lg"
+                      className="w-full py-2 bg-transparent text-slate-300 hover:text-white border border-slate-500 rounded-lg hover:border-slate-400"
                     >
                       Create New Account
                     </button>
                   </div>
                   
-                  <button 
-                    onClick={() => setShowLoginModal(false)}
-                    className="absolute top-4 right-4 text-purple-400 hover:text-white"
-                  >
-                    ✕
-                  </button>
-                  
-                  <p className="text-center text-purple-400 text-xs mt-4">Demo accounts: admin/admin123, john/john123, sarah/sarah123</p>
+                  <p className="text-center text-slate-500 text-xs mt-4">Demo: admin/admin123, john/john123, sarah/sarah123</p>
+                  <p className="text-center text-slate-600 text-xs mt-1">Press ESC or click outside to close</p>
                 </div>
               </div>
             )}
