@@ -1560,6 +1560,27 @@ const App = () => {
 
   // API mock
   const callAPI = useCallback(async (p) => {
+    // CHAT action should ALWAYS go to real backend for Gemini AI
+    if (p.action === "CHAT") {
+      try {
+        const url = localStorage.getItem("sap_playbook_backend_url");
+        if (!url) {
+          return {success: false, error: "Backend URL not configured. Please set it in Admin settings."};
+        }
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {"Content-Type": "text/plain"},
+          body: JSON.stringify(p)
+        });
+        const text = await response.text();
+        return JSON.parse(text);
+      } catch (error) {
+        console.error("Chat API error:", error);
+        return {success: false, error: error.message};
+      }
+    }
+    
+    // Other actions use mock data for demo
     await new Promise(r => setTimeout(r, 200));
     
     if (p.action === "GET_COUNTRY") {
@@ -2405,12 +2426,8 @@ const App = () => {
       };
     }
     
-    if (p.action === "CHAT") {
-      const m = p.message.toLowerCase();
-      if (m.includes("create")) return {success: true, response: "Use CJ20N:\n1. Open Number\n2. Enter company data\n3. Create WBS L1 (PE) and L2 (PE+ACCT)\n4. Set status\n5. Verify ZJ053"};
-      if (m.includes("budget")) return {success: true, response: "Use ZJ40:\n• Always WBS Level 1\n• Check exchange rate\n\n>5M = Tax Review\n>3M = JV Letter"};
-      return {success: true, response: "I can help with projects, budgets, and rules."};
-    }
+    // CHAT action should go to real backend - no mock here
+    
     if (p.action === "COMPARE_COUNTRIES") {
       return {
         success: true,
