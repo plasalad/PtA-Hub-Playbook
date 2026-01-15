@@ -2473,544 +2473,62 @@ const App = () => {
     setChatMessages(p => [...p, {role: "user", content: userMessage}]);
     setChatInput("");
     
-    // Smarter AI with keyword scoring
-    const q = userMessage.toLowerCase();
-    let response = "";
+    // Show thinking indicator
+    setChatMessages(p => [...p, {role: "ai", content: "💭 Thinking...", isLoading: true}]);
     
-    // Knowledge base with keywords and responses
-    const knowledge = [
-      {
-        keywords: ["capex", "opex", "capital", "operating", "expense", "expenditure"],
-        response: `💰 **CAPEX vs OPEX Explained**
-
-**CAPEX (Capital Expenditure):**
-• Long-term investments in assets
-• Capitalized on balance sheet
-• Depreciated over asset life
-• Examples: Wells, facilities, equipment
-• Budget Classes: 01, 02, 03
-
-**OPEX (Operating Expenditure):**
-• Day-to-day operating costs
-• Expensed immediately in P&L
-• No depreciation
-• Examples: Maintenance, repairs, services
-
-**Key Differences:**
-| Aspect | CAPEX | OPEX |
-|--------|-------|------|
-| Treatment | Capitalize | Expense |
-| Balance Sheet | Yes (Asset) | No |
-| P&L Impact | Depreciation | Immediate |
-| Tax | Over time | Immediate |
-
-**Fund.IT Ruling:**
-For EMIT (03) projects, Fund.IT determines CAPEX vs OPEX treatment before project creation.`
-      },
-      {
-        keywords: ["abex", "abandonment", "decommission", "decom", "xf", "490000030"],
-        response: `🔧 **ABEX (Abandonment Expenditure)**
-
-**What is ABEX?**
-Costs for decommissioning, dismantling, and restoring sites at end of asset life.
-
-**Budget Class:** XF (Decommissioning)
-
-**Key Characteristics:**
-• Not capitalized (no asset creation)
-• Settles to Cost Center 490000030
-• Requires provision accounting
-• Subject to ARO (Asset Retirement Obligation)
-
-**ABEX vs CAPEX:**
-| Aspect | ABEX | CAPEX |
-|--------|------|-------|
-| Purpose | Remove assets | Build assets |
-| Settlement | Cost Center | Asset |
-| Budget Class | XF | 01, 02, 03 |
-| Capitalization | No | Yes |
-
-**Critical Process:**
-1. Create project with XF class
-2. Set settlement rule → 490000030
-3. ⚠️ BEFORE TECO: Verify settlement!
-4. Then set TECO status
-
-**Common Error:**
-Setting TECO before settlement rule = blocked at month-end`
-      },
-      {
-        keywords: ["capex", "abex", "different", "difference", "vs", "versus", "compare"],
-        response: `📊 **CAPEX vs ABEX Comparison**
-
-**CAPEX (Capital Expenditure):**
-• Building/acquiring assets
-• Creates value on balance sheet
-• Budget Classes: 01 (Drilling), 02 (Facilities), 03 (EMIT)
-• Settlement: To Asset (AUC → Final Asset)
-
-**ABEX (Abandonment Expenditure):**
-• Removing/decommissioning assets
-• Fulfills environmental obligations
-• Budget Class: XF (Decommissioning)
-• Settlement: To Cost Center 490000030
-
-**Side-by-Side:**
-| Aspect | CAPEX | ABEX |
-|--------|-------|------|
-| Purpose | Build | Remove |
-| Asset Impact | +Asset | -Asset |
-| Budget Class | 01/02/03 | XF |
-| Settlement To | Asset | Cost Center |
-| Capitalized | Yes | No |
-| Tax Treatment | Depreciate | Expense |
-
-**In Project Lifecycle:**
-\`\`\`
-Exploration (CAPEX) → Development (CAPEX) → 
-Production → Decommissioning (ABEX)
-\`\`\``
-      },
-      {
-        keywords: ["create", "new", "project", "cj20n"],
-        response: `📋 **Creating a New Project**
-
-**Transaction:** CJ20N
-
-**Steps:**
-1. Open CJ20N → Click "Open Number" (F5)
-2. Enter Company Code:
-   • 1230 = EMOP
-   • 4310 = OBO
-3. Create **WBS Level 1**:
-   • Format: 6XX/YYNNN (e.g., 601/25001)
-   • Check "Planning Element" (PE)
-4. Create **WBS Level 2**:
-   • Format: 6XX/YYNNN.01
-   • Check both PE and ACCT
-5. Set status to REL (Released)
-6. Save and verify in ZJ053
-
-**Prerequisites:**
-• FCCR approval
-• Fund.IT ruling (for EMIT)
-• Tax review (if >$3M AUD net)`
-      },
-      {
-        keywords: ["pe", "acct", "planning", "element", "account", "assignment"],
-        response: `📖 **PE and ACCT Indicators**
-
-**PE (Planning Element):**
-• Enables budget planning
-• Required for WBS L1
-• Allows ZJ40 budget entry
-
-**ACCT (Account Assignment):**
-• Enables cost posting
-• Required for WBS L2
-• Allows POs, timesheets, invoices
-
-**Configuration:**
-| Level | PE | ACCT | Use |
-|-------|----|----- |-----|
-| L1 | ✓ | ✗ | Budget only |
-| L2 | ✓ | ✓ | Budget + costs |
-
-**Why Both on L2?**
-• PE: Receive budget from L1
-• ACCT: Post actual costs`
-      },
-      {
-        keywords: ["budget", "enter", "zj40", "add", "funding"],
-        response: `💰 **Budget Entry (ZJ40)**
-
-**Steps:**
-1. Open ZJ40
-2. Enter Project Number
-3. Select Funding Stage:
-   • **AC** = Advance Commitment
-   • **FF** = Full Funding  
-   • **SUP** = Supplement
-4. Enter Gross Budget (100%)
-5. System calculates Net = Gross × EM%
-
-**Approval Levels (Net USD):**
-| Net USD | Level |
-|---------|-------|
-| ≤$100K | L10 |
-| ≤$500K | L9 |
-| ≤$1M | L8 |
-| ≤$5M | L7 |
-| ≤$20M | L6 |
-| ≤$50M | L5 |
-
-**FX Rate:** 1.59 AUD/USD`
-      },
-      {
-        keywords: ["settlement", "ko02", "ko88", "rule", "receiver"],
-        response: `⚙️ **Settlement Rules**
-
-**Transactions:**
-• **KO02** - Create/edit rule
-• **KO88** - Execute settlement
-
-**Settlement Receivers:**
-| Project Type | Receiver |
-|-------------|----------|
-| Capital | Asset (AUC) |
-| Decommissioning | CC 490000030 |
-| Expense | Cost Center |
-
-**Key Rules:**
-1. Every WBS L2 needs a rule
-2. Configure BEFORE TECO
-3. Total must = 100%
-
-⚠️ **Critical:** For XF projects, set settlement BEFORE TECO status!`
-      },
-      {
-        keywords: ["teco", "technically", "complete", "close", "status"],
-        response: `🏁 **TECO Status**
-
-**What:** Marks project operationally complete
-
-**Transaction:** CJ20N → Status → TECO
-
-**Before TECO:**
-✓ All goods received
-✓ All services accepted
-✓ Settlement rule configured
-✓ No pending commitments
-
-**⚠️ For Decommissioning (XF):**
-1. Set settlement rule FIRST
-2. THEN set TECO
-3. Wrong order = errors!
-
-**After TECO:**
-• No new POs
-• Can still invoice existing
-• Settlement continues`
-      },
-      {
-        keywords: ["tax", "review", "3m", "threshold", "million"],
-        response: `📊 **Tax Review**
-
-**Threshold:** Net Budget > $3M AUD
-
-**When Required:**
-• New projects exceeding threshold
-• Budget increases pushing over $3M
-
-**Process:**
-1. Complete Tax Review Form
-2. Submit to Tax Team
-3. Obtain approval
-4. Attach to documentation
-
-**Combined Approvals:**
-• >$3M → Tax Review
-• >$5M → Tax Review + JV Approval`
-      },
-      {
-        keywords: ["jv", "joint", "venture", "partner", "share"],
-        response: `🤝 **Joint Venture (JV)**
-
-**JV Codes (Australia):**
-| Code | Partner | EM Share |
-|------|---------|----------|
-| AU001 | JV Partner A | 50% |
-| AU002 | JV Partner B | 20% |
-| AU003 | EM Sole Risk | 100% |
-
-**JV Approval:** Required if Net > $5M AUD
-
-**Budget Calculation:**
-Net = Gross × (EM Share ÷ 100)
-
-**Example:**
-Gross $10M × 50% = $5M Net`
-      },
-      {
-        keywords: ["emit", "fund.it", "ruling", "03"],
-        response: `📋 **EMIT Projects (Budget Class 03)**
-
-**EMIT:** Exploration, Mining, IT & Technology
-
-**Fund.IT Ruling Required:**
-Before creating project, get CAPEX/OPEX determination
-
-**Process:**
-1. Submit to Fund.IT team
-2. Receive CAPEX or OPEX ruling
-3. Create project with ruling ref
-4. Follow normal process
-
-**Timeline:** 5-10 business days`
-      },
-      {
-        keywords: ["wbs", "structure", "breakdown", "level", "naming"],
-        response: `📊 **WBS Structure**
-
-**Format:** 6XX/YYNNN
-• 6 = Australia
-• XX = Budget class
-• YY = Year
-• NNN = Sequence
-
-**Levels:**
-\`\`\`
-L1: 601/25001 (PE)
- └─ L2: 601/25001.01 (PE+ACCT)
-\`\`\`
-
-**Budget Classes:**
-• 01 = Drilling
-• 02 = Facilities
-• 03 = EMIT
-• XF = Decommissioning`
-      },
-      {
-        keywords: ["tcode", "t-code", "transaction", "code"],
-        response: `🔤 **Common T-Codes**
-
-**Projects:**
-• CJ20N - Project Builder
-• CJ03 - Display project
-• ZJ053 - Project report
-
-**Budget:**
-• ZJ40 - Budget entry
-• CJ30/31 - Budget management
-
-**Settlement:**
-• KO02 - Edit rule
-• KO88 - Execute
-
-**Procurement:**
-• ME21N/23N - PO create/display
-• MIGO - Goods receipt
-• ML81N - Service entry`
-      },
-      {
-        keywords: ["approval", "level", "threshold", "authorize"],
-        response: `✅ **Approval Levels**
-
-**Net USD Thresholds:**
-| Level | AC/FF | SUP |
-|-------|-------|-----|
-| L1-4 | Unlimited | Varies |
-| L5 | $50M | $20M |
-| L6 | $20M | N/A |
-| L7 | $5M | N/A |
-| L8 | $1M | N/A |
-| L9 | $500K | N/A |
-| L10 | $100K | N/A |
-
-**Additional:**
-• >$3M AUD → Tax Review
-• >$5M AUD → JV Approval`
-      },
-      {
-        keywords: ["exchange", "rate", "fx", "currency", "usd", "aud"],
-        response: `💱 **Exchange Rate**
-
-**Current:** 1.59 AUD/USD
-(1 AUD = 0.6289 USD)
-
-**Updates:** Jan 1 & Jul 1 (DOAG)
-
-**Calculation:**
-Net USD = Net AUD ÷ 1.59
-
-**Example:**
-$5M AUD ÷ 1.59 = $3.14M USD`
-      },
-      {
-        keywords: ["obo", "6602", "business", "area"],
-        response: `🏢 **OBO (On Behalf Of)**
-
-**Business Area:** 6602
-**Company Code:** 4310
-
-**Key Differences:**
-• Recovery Indicator: NB (Non-billable)
-• Separate approval thresholds
-• Different JV arrangements
-
-**OBO Thresholds:**
-Based on project stage (PRE, APR, DEV, PRD)`
-      },
-      {
-        keywords: ["fccr", "approval", "form"],
-        response: `📝 **FCCR (Funding Capital Cost Request)**
-
-**What:** Approval form required for ALL projects
-
-**No Threshold:** Required regardless of amount
-
-**Process:**
-1. Complete FCCR form
-2. Obtain required signatures
-3. Attach to project documentation
-4. Reference in SAP
-
-**Signatures Based On:**
-Budget amount determines approval level`
-      }
-    ];
-    
-    // Score each knowledge item based on keyword matches
-    let bestMatch = null;
-    let bestScore = 0;
-    
-    for (const item of knowledge) {
-      let score = 0;
-      for (const keyword of item.keywords) {
-        if (q.includes(keyword)) {
-          // Exact word match scores higher
-          const regex = new RegExp(`\\b${keyword}\\b`, 'i');
-          if (regex.test(q)) {
-            score += 3;
-          } else {
-            score += 1;
-          }
+    try {
+      // Call backend with Gemini AI
+      const result = await callAPI({
+        action: "CHAT",
+        message: userMessage,
+        context: {
+          history: chatMessages.slice(-10) // Send last 10 messages for context
         }
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = item;
-      }
-    }
-    
-    // Use best match if score is good enough
-    if (bestScore >= 2 && bestMatch) {
-      response = bestMatch.response;
-      setChatMessages(p => [...p, {role: "ai", content: response}]);
-    }
-    // Help request
-    else if (q.includes("help") || q.includes("what can you")) {
-      response = `🤖 **SAP Playbook Assistant**
-
-I can help with:
-
-**📋 Projects & WBS**
-• "How to create a project"
-• "Explain WBS structure"
-• "What is PE and ACCT"
-
-**💰 Budget & Finance**
-• "What's the difference between CAPEX and ABEX"
-• "How to enter budget"
-• "Exchange rate info"
-
-**⚙️ Processes**
-• "Settlement rules"
-• "TECO status"
-• "Tax review requirements"
-
-**🔤 Reference**
-• "List T-codes"
-• "Approval levels"
-• "JV codes"
-
-**🌐 General Questions**
-I can also search the web and use AI to answer questions outside the playbook!
-
-Just ask naturally!`;
-      setChatMessages(p => [...p, {role: "ai", content: response}]);
-    }
-    // Fallback - Use Claude API with web search
-    else {
-      // Show thinking message
-      setChatMessages(p => [...p, {role: "ai", content: "🔍 Searching for information..."}]);
+      });
       
-      try {
-        const apiResponse = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            system: `You are a helpful assistant integrated into an SAP Playbook application for oil & gas project management. 
-            
-Context: This playbook helps users manage SAP projects for Australia operations, including:
-- Project creation (CJ20N), budgets (ZJ40), settlement rules (KO02/KO88)
-- CAPEX vs OPEX vs ABEX (decommissioning)
-- Approval thresholds and tax reviews
-- WBS structure and T-codes
-
-When answering:
-1. If the question is about SAP, oil & gas, or finance topics, provide helpful information
-2. For current events or facts you're unsure about, use web search
-3. Keep responses concise but informative
-4. Format with markdown (bold, bullets) for readability
-5. If asked about something completely unrelated, still try to help but mention you're primarily an SAP assistant`,
-            messages: [
-              { role: "user", content: userMessage }
-            ],
-            tools: [
-              {
-                "type": "web_search_20250305",
-                "name": "web_search"
-              }
-            ]
-          })
-        });
-
-        const data = await apiResponse.json();
-        
-        // Extract text from response
-        let aiResponse = "";
-        if (data.content) {
-          for (const block of data.content) {
-            if (block.type === "text") {
-              aiResponse += block.text;
-            }
-          }
-        }
-        
-        if (aiResponse) {
-          // Remove the "searching" message and add real response
-          setChatMessages(p => {
-            const updated = [...p];
-            updated[updated.length - 1] = {role: "ai", content: aiResponse};
-            return updated;
-          });
-        } else {
-          setChatMessages(p => {
-            const updated = [...p];
-            updated[updated.length - 1] = {role: "ai", content: `I couldn't find specific information about "${userMessage}".
-
-**For SAP topics, try asking about:**
-• CAPEX vs ABEX differences
-• How to create a project
-• Budget entry process
-• Settlement rules
-• Approval thresholds
-
-Or type **"help"** for all playbook topics!`};
-            return updated;
-          });
-        }
-      } catch (error) {
-        console.error("AI API error:", error);
+      if (result.success && result.response) {
+        // Replace thinking message with actual response
         setChatMessages(p => {
           const updated = [...p];
-          updated[updated.length - 1] = {role: "ai", content: `I couldn't search for that information right now.
+          updated[updated.length - 1] = {role: "ai", content: result.response};
+          return updated;
+        });
+      } else {
+        // If backend fails, show error but try to be helpful
+        setChatMessages(p => {
+          const updated = [...p];
+          updated[updated.length - 1] = {
+            role: "ai", 
+            content: `⚠️ I couldn't connect to the AI service. 
 
-**For SAP topics in the playbook, try:**
-• CAPEX vs ABEX differences
-• How to create a project
-• Budget entry process
+**Error:** ${result.error || "Connection failed"}
+
+**To fix this:**
+1. Go to Admin → Settings
+2. Make sure Backend URL is configured
+3. Ensure Gemini API key is set in Script Properties
+
+Or try asking about SAP topics like:
+• Project creation (CJ20N)
+• Budget entry (ZJ40)
 • Settlement rules
-
-Or type **"help"** for all topics!`};
+• Approval thresholds`
+          };
           return updated;
         });
       }
+    } catch (error) {
+      console.error("Chat error:", error);
+      setChatMessages(p => {
+        const updated = [...p];
+        updated[updated.length - 1] = {
+          role: "ai", 
+          content: `⚠️ Connection error: ${error.message}
+
+Please check that the backend is configured in Admin settings.`
+        };
+        return updated;
+      });
     }
   };
 
