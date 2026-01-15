@@ -9662,8 +9662,33 @@ ${auditLines}
             </div>
             <div className="flex-1 overflow-auto p-4 space-y-3">
               {chatMessages.map((m, i) => (
-                <div key={i} className={`chat-bubble ${m.role === "user" ? "chat-user" : "chat-ai"}`} style={{whiteSpace: "pre-wrap"}}>
-                  {m.content}
+                <div key={i} className={`chat-bubble ${m.role === "user" ? "chat-user" : "chat-ai"}`}>
+                  {m.role === "user" ? m.content : (
+                    <div 
+                      dangerouslySetInnerHTML={{
+                        __html: m.content
+                          // Code blocks
+                          .replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+                          // Inline code
+                          .replace(/`([^`]+)`/g, '<code>$1</code>')
+                          // Bold
+                          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                          // Italic
+                          .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+                          // Headers
+                          .replace(/^### (.+)$/gm, '<h4 style="font-weight:600;margin:12px 0 6px;font-size:14px;">$1</h4>')
+                          .replace(/^## (.+)$/gm, '<h3 style="font-weight:600;margin:14px 0 8px;font-size:15px;">$1</h3>')
+                          .replace(/^# (.+)$/gm, '<h2 style="font-weight:700;margin:16px 0 10px;font-size:16px;">$1</h2>')
+                          // Bullet points
+                          .replace(/^[\*\-•] (.+)$/gm, '<div style="display:flex;gap:8px;margin:4px 0;"><span>•</span><span>$1</span></div>')
+                          // Numbered lists
+                          .replace(/^(\d+)\. (.+)$/gm, '<div style="display:flex;gap:8px;margin:4px 0;"><span>$1.</span><span>$2</span></div>')
+                          // Line breaks
+                          .replace(/\n\n/g, '<div style="margin:12px 0;"></div>')
+                          .replace(/\n/g, '<br/>')
+                      }}
+                    />
+                  )}
                 </div>
               ))}
               <div ref={chatEndRef} />
