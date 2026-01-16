@@ -8,6 +8,10 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tesseract.js for OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- PDF.js for PDF processing -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -1558,6 +1562,18 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false);
   
   const fileInputRef = useRef(null);
+  const chatFileInputRef = useRef(null);
+  
+  // OCR State
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const [ocrStatus, setOcrStatus] = useState("");
+  const [extractedText, setExtractedText] = useState("");
+  
+  // Chat Upload State
+  const [chatUploadFile, setChatUploadFile] = useState(null);
+  const [chatUploadProgress, setChatUploadProgress] = useState(0);
+  const [chatUploadStatus, setChatUploadStatus] = useState("");
+  const [pendingAction, setPendingAction] = useState(null); // {type: 'create_checklist' | 'update_rules', data: {...}}
   const chatEndRef = useRef(null);
 
   // API mock
@@ -2450,17 +2466,263 @@ const App = () => {
   }, [chatMessages]);
 
   // Handlers
+  // OCR Processing Function
+  const processOCR = async (imageSource) => {
+    try {
+      setOcrStatus("Initializing OCR engine...");
+      setOcrProgress(10);
+      
+      const worker = await Tesseract.createWorker('eng+tha', 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            setOcrProgress(30 + Math.round(m.progress * 60));
+            setOcrStatus(`Recognizing text... ${Math.round(m.progress * 100)}%`);
+          }
+        }
+      });
+      
+      setOcrStatus("Processing image...");
+      setOcrProgress(30);
+      
+      const { data: { text } } = await worker.recognize(imageSource);
+      
+      setOcrProgress(95);
+      setOcrStatus("Finalizing...");
+      
+      await worker.terminate();
+      
+      setOcrProgress(100);
+      setOcrStatus("Complete!");
+      
+      return text;
+    } catch (error) {
+      console.error("OCR Error:", error);
+      throw error;
+    }
+  };
+  
+  // Convert PDF to images for OCR
+  const processPDF = async (file) => {
+    try {
+      setOcrStatus("Loading PDF...");
+      setOcrProgress(5);
+      
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      let fullText = "";
+      const totalPages = pdf.numPages;
+      
+      for (let i = 1; i <= Math.min(totalPages, 5); i++) { // Process max 5 pages
+        setOcrStatus(`Processing page ${i} of ${Math.min(totalPages, 5)}...`);
+        setOcrProgress(10 + (i / Math.min(totalPages, 5)) * 80);
+        
+        const page = await pdf.getPage(i);
+        const scale = 2; // Higher scale = better OCR quality
+        const viewport = page.getViewport({ scale });
+        
+        // Create canvas
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        
+        // Render PDF page to canvas
+        await page.render({ canvasContext: context, viewport }).promise;
+        
+        // Convert canvas to image and run OCR
+        const imageData = canvas.toDataURL('image/png');
+        const pageText = await processOCR(imageData);
+        fullText += `\n--- Page ${i} ---\n${pageText}`;
+      }
+      
+      if (totalPages > 5) {
+        fullText += `\n\n[Note: Only first 5 of ${totalPages} pages processed]`;
+      }
+      
+      return fullText;
+    } catch (error) {
+      console.error("PDF Processing Error:", error);
+      throw error;
+    }
+  };
+  
   const handleFile = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
+    
     setIsLoading(true);
-    const r = await callAPI({action: "PROCESS_INTAKE"});
-    if (r.success) {
-      setIntakeResult(r);
-      setIntakeInput(r.extracted || {});
+    setOcrProgress(0);
+    setOcrStatus("Starting...");
+    setExtractedText("");
+    setIntakeResult(null);
+    
+    try {
+      let text = "";
+      const fileType = f.type;
+      const fileName = f.name.toLowerCase();
+      
+      // Handle different file types
+      if (fileType.startsWith('image/') || fileName.match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)) {
+        // Image file - direct OCR
+        setOcrStatus("Processing image...");
+        const imageUrl = URL.createObjectURL(f);
+        text = await processOCR(imageUrl);
+        URL.revokeObjectURL(imageUrl);
+        
+      } else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+        // PDF file - convert to images then OCR
+        setOcrStatus("Processing PDF...");
+        // Set PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        text = await processPDF(f);
+        
+      } else if (fileType === 'text/plain' || fileName.endsWith('.txt')) {
+        // Plain text file - read directly
+        setOcrStatus("Reading text file...");
+        setOcrProgress(50);
+        text = await f.text();
+        setOcrProgress(100);
+        
+      } else {
+        throw new Error("Unsupported file type. Please upload an image, PDF, or text file.");
+      }
+      
+      setExtractedText(text);
+      setOcrStatus("Analyzing with AI...");
+      
+      // Send extracted text to AI for analysis
+      const result = await callAPI({
+        action: "ANALYZE_INTAKE",
+        text: text,
+        fileName: f.name
+      });
+      
+      if (result.success) {
+        setIntakeResult(result);
+        setIntakeInput(result.extracted || {});
+      } else {
+        // Fallback: Create basic intake result from extracted text
+        const detectedType = detectActivityType(text);
+        setIntakeResult({
+          success: true,
+          detected: detectedType.activity,
+          summary: detectedType.summary,
+          confidence: detectedType.confidence,
+          extracted: extractFieldsFromText(text),
+          extractedText: text,
+          suggestedTasks: detectedType.tasks
+        });
+        setIntakeInput(extractFieldsFromText(text));
+      }
+      
+    } catch (error) {
+      console.error("File processing error:", error);
+      alert("Error processing file: " + error.message);
     }
+    
     setIsLoading(false);
+    setOcrProgress(0);
+    setOcrStatus("");
     e.target.value = "";
+  };
+  
+  // Detect activity type from extracted text
+  const detectActivityType = (text) => {
+    const lowerText = text.toLowerCase();
+    
+    if (lowerText.includes('afe') || lowerText.includes('authority for expenditure')) {
+      return {
+        activity: "CREATE_PROJECT",
+        summary: "AFE Document - Project Creation Required",
+        confidence: 90,
+        tasks: [{ workflowId: "CREATE_PROJECT", name: "Create New Project" }]
+      };
+    } else if (lowerText.includes('fccr') || lowerText.includes('funding capital')) {
+      return {
+        activity: "ADD_BUDGET",
+        summary: "FCCR Document - Budget Entry Required",
+        confidence: 88,
+        tasks: [{ workflowId: "ADD_BUDGET", name: "Enter Budget" }]
+      };
+    } else if (lowerText.includes('purchase order') || lowerText.includes('po number')) {
+      return {
+        activity: "CHECK_STATUS",
+        summary: "Purchase Order - Status Check",
+        confidence: 85,
+        tasks: [{ workflowId: "CHECK_PO_STATUS", name: "Check PO Status" }]
+      };
+    } else if (lowerText.includes('service entry') || lowerText.includes('ses')) {
+      return {
+        activity: "CREATE_SES",
+        summary: "Service Entry Sheet Required",
+        confidence: 87,
+        tasks: [{ workflowId: "CREATE_SES", name: "Create SES" }]
+      };
+    } else if (lowerText.includes('goods receipt') || lowerText.includes('migo')) {
+      return {
+        activity: "CREATE_GR",
+        summary: "Goods Receipt Required",
+        confidence: 86,
+        tasks: [{ workflowId: "CREATE_GR", name: "Create Goods Receipt" }]
+      };
+    } else if (lowerText.includes('budget') || lowerText.includes('zj40')) {
+      return {
+        activity: "ADD_BUDGET",
+        summary: "Budget Related Document",
+        confidence: 80,
+        tasks: [{ workflowId: "ADD_BUDGET", name: "Enter Budget" }]
+      };
+    } else if (lowerText.includes('project') || lowerText.includes('wbs') || lowerText.includes('cj20n')) {
+      return {
+        activity: "CREATE_PROJECT",
+        summary: "Project Related Document",
+        confidence: 75,
+        tasks: [{ workflowId: "CREATE_PROJECT", name: "Create New Project" }]
+      };
+    }
+    
+    return {
+      activity: "UNKNOWN",
+      summary: "Document requires manual review",
+      confidence: 50,
+      tasks: []
+    };
+  };
+  
+  // Extract fields from text using patterns
+  const extractFieldsFromText = (text) => {
+    const extracted = {};
+    
+    // WBS Number pattern: 6XX/YYNNN or similar
+    const wbsMatch = text.match(/\b(6\d{2}\/\d{5}(?:\.\d{2})?)\b/);
+    if (wbsMatch) extracted.wbs = wbsMatch[1];
+    
+    // Company Code pattern
+    const ccMatch = text.match(/company\s*code[:\s]*(\d{4})/i) || text.match(/\b(1230|0495|4310)\b/);
+    if (ccMatch) extracted.companyCode = ccMatch[1];
+    
+    // Budget/Amount pattern
+    const amountMatch = text.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
+    if (amountMatch) extracted.amount = amountMatch[1].replace(/,/g, '');
+    
+    // Project name - look for common patterns
+    const projectMatch = text.match(/project[:\s]+([^\n]+)/i);
+    if (projectMatch) extracted.projectName = projectMatch[1].trim().substring(0, 50);
+    
+    // AFE number
+    const afeMatch = text.match(/afe[:\s#-]*(\w+-?\d+)/i);
+    if (afeMatch) extracted.afeNumber = afeMatch[1];
+    
+    // PO Number
+    const poMatch = text.match(/p\.?o\.?[:\s#-]*(\d+)/i);
+    if (poMatch) extracted.poNumber = poMatch[1];
+    
+    // Date patterns
+    const dateMatch = text.match(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/);
+    if (dateMatch) extracted.date = dateMatch[1];
+    
+    return extracted;
   };
 
   const createTask = async (wfId) => {
@@ -2486,9 +2748,315 @@ const App = () => {
     setIsLoading(false);
   };
 
+  // Handle chat file upload
+  const handleChatFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setChatUploadFile(file);
+    setChatUploadProgress(0);
+    setChatUploadStatus("Processing...");
+    
+    // Add user message showing file upload
+    setChatMessages(p => [...p, {
+      role: "user", 
+      content: `📎 Uploaded: ${file.name}`,
+      attachment: { name: file.name, type: file.type, size: file.size }
+    }]);
+    
+    // Show thinking indicator
+    setChatMessages(p => [...p, {role: "ai", content: "📄 Analyzing document...", isLoading: true}]);
+    
+    try {
+      let extractedText = "";
+      const fileType = file.type;
+      const fileName = file.name.toLowerCase();
+      
+      // Process file based on type
+      if (fileType.startsWith('image/') || fileName.match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)) {
+        setChatUploadStatus("Running OCR on image...");
+        const imageUrl = URL.createObjectURL(file);
+        extractedText = await processOCR(imageUrl);
+        URL.revokeObjectURL(imageUrl);
+      } else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+        setChatUploadStatus("Processing PDF...");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        extractedText = await processPDF(file);
+      } else if (fileType === 'text/plain' || fileName.endsWith('.txt')) {
+        extractedText = await file.text();
+      } else if (fileName.endsWith('.csv') || fileType === 'text/csv') {
+        extractedText = await file.text();
+      } else {
+        throw new Error("Unsupported file type. Please upload an image, PDF, text, or CSV file.");
+      }
+      
+      setChatUploadStatus("Analyzing with AI...");
+      setChatUploadProgress(80);
+      
+      // Send to AI for intelligent analysis
+      const result = await callAPI({
+        action: "ANALYZE_CHAT_DOCUMENT",
+        text: extractedText,
+        fileName: file.name,
+        fileType: file.type,
+        user: currentUser?.displayName || "Unknown"
+      });
+      
+      setChatUploadProgress(100);
+      
+      if (result.success) {
+        // Store document reference
+        const docRef = result.documentId || `DOC-${Date.now()}`;
+        
+        // Build response based on detected type
+        let aiResponse = "";
+        
+        if (result.documentType === "ACTIVITY") {
+          // Activity document (AFE, FCCR, PO, etc.)
+          aiResponse = `📋 **Document Analysis Complete**
+
+I detected this is a **${result.activityName || result.detected}** document.
+
+**Extracted Information:**
+${Object.entries(result.extracted || {}).map(([k, v]) => `• ${k}: ${v}`).join('\n')}
+
+**Confidence:** ${result.confidence || 85}%
+
+${result.suggestedWorkflow ? `Would you like me to create a **${result.suggestedWorkflow.name}** checklist in the Tasks module with this information?
+
+Type **"yes"** to create the checklist, or ask me anything else.` : ''}
+
+📁 Document saved for audit (Ref: ${docRef})`;
+          
+          // Store pending action
+          if (result.suggestedWorkflow) {
+            setPendingAction({
+              type: 'create_checklist',
+              data: {
+                workflowId: result.suggestedWorkflow.id,
+                workflowName: result.suggestedWorkflow.name,
+                extracted: result.extracted,
+                documentRef: docRef,
+                fileName: file.name
+              }
+            });
+          }
+          
+        } else if (result.documentType === "RULE_UPDATE") {
+          // Rule update document (DOAG, thresholds, etc.)
+          aiResponse = `📜 **Rule Update Document Detected**
+
+I found **${result.ruleType || "configuration changes"}** in this document.
+
+**Changes Detected:**
+${(result.changes || []).map(c => `• ${c.field}: ${c.oldValue || 'N/A'} → ${c.newValue}`).join('\n')}
+
+**Affected Area:** ${result.affectedArea || "Country Configuration"}
+
+Would you like me to **update the playbook rules** with these changes?
+
+Type **"yes"** to apply updates, or **"no"** to cancel.
+
+📁 Document saved for audit (Ref: ${docRef})`;
+          
+          // Store pending action
+          setPendingAction({
+            type: 'update_rules',
+            data: {
+              ruleType: result.ruleType,
+              changes: result.changes,
+              affectedArea: result.affectedArea,
+              documentRef: docRef,
+              fileName: file.name,
+              country: result.country || selectedCountry
+            }
+          });
+          
+        } else {
+          // Unknown or informational document
+          aiResponse = `📄 **Document Processed**
+
+I analyzed the document but couldn't determine a specific action.
+
+**Summary:** ${result.summary || "General document"}
+
+**Extracted Text Preview:**
+${extractedText.substring(0, 500)}${extractedText.length > 500 ? '...' : ''}
+
+📁 Document saved for reference (Ref: ${docRef})
+
+How can I help you with this document?`;
+        }
+        
+        // Update chat with AI response
+        setChatMessages(p => {
+          const updated = [...p];
+          updated[updated.length - 1] = {role: "ai", content: aiResponse};
+          return updated;
+        });
+        
+      } else {
+        throw new Error(result.error || "Analysis failed");
+      }
+      
+    } catch (error) {
+      console.error("Chat upload error:", error);
+      setChatMessages(p => {
+        const updated = [...p];
+        updated[updated.length - 1] = {
+          role: "ai", 
+          content: `⚠️ Error processing document: ${error.message}
+
+Please try again or upload a different file format.`
+        };
+        return updated;
+      });
+    }
+    
+    setChatUploadFile(null);
+    setChatUploadProgress(0);
+    setChatUploadStatus("");
+    e.target.value = "";
+  };
+  
+  // Handle pending action confirmation
+  const handlePendingActionConfirm = async (confirmed) => {
+    if (!pendingAction) return;
+    
+    if (!confirmed) {
+      setChatMessages(p => [...p, {role: "user", content: "No"}]);
+      setChatMessages(p => [...p, {role: "ai", content: "Okay, no changes made. The document is still saved for reference. Is there anything else I can help with?"}]);
+      setPendingAction(null);
+      return;
+    }
+    
+    setChatMessages(p => [...p, {role: "user", content: "Yes"}]);
+    setChatMessages(p => [...p, {role: "ai", content: "⏳ Processing...", isLoading: true}]);
+    
+    try {
+      if (pendingAction.type === 'create_checklist') {
+        // Create checklist in Tasks module
+        const result = await callAPI({
+          action: "CREATE_CHECKLIST_FROM_DOCUMENT",
+          workflowId: pendingAction.data.workflowId,
+          extracted: pendingAction.data.extracted,
+          documentRef: pendingAction.data.documentRef,
+          fileName: pendingAction.data.fileName,
+          user: currentUser?.displayName || "Unknown"
+        });
+        
+        if (result.success) {
+          // Update local state with new checklist
+          setCurrentTask(result.checklist);
+          setCompletedSteps({});
+          
+          setChatMessages(p => {
+            const updated = [...p];
+            updated[updated.length - 1] = {
+              role: "ai", 
+              content: `✅ **Checklist Created Successfully!**
+
+**${pendingAction.data.workflowName}** checklist has been created with:
+${Object.entries(pendingAction.data.extracted || {}).map(([k, v]) => `• ${k}: ${v}`).join('\n')}
+
+📋 Checklist ID: ${result.checklistId || result.checklist?.id}
+📁 Document Reference: ${pendingAction.data.documentRef}
+
+**Click "Go to Tasks"** to start working on the checklist, or I can help you with something else.`
+            };
+            return updated;
+          });
+          
+          // Add action button
+          setChatMessages(p => [...p, {
+            role: "ai", 
+            content: "GO_TO_TASKS_BUTTON",
+            isButton: true,
+            buttonAction: () => setModule("tasks")
+          }]);
+          
+        } else {
+          throw new Error(result.error || "Failed to create checklist");
+        }
+        
+      } else if (pendingAction.type === 'update_rules') {
+        // Update rules/configuration
+        const result = await callAPI({
+          action: "UPDATE_RULES_FROM_DOCUMENT",
+          ruleType: pendingAction.data.ruleType,
+          changes: pendingAction.data.changes,
+          country: pendingAction.data.country,
+          documentRef: pendingAction.data.documentRef,
+          fileName: pendingAction.data.fileName,
+          user: currentUser?.displayName || "Unknown"
+        });
+        
+        if (result.success) {
+          // Reload country config
+          const configResult = await callAPI({action: "GET_CONFIG", country: pendingAction.data.country});
+          if (configResult.success) {
+            setCountryConfig(configResult.config);
+          }
+          
+          setChatMessages(p => {
+            const updated = [...p];
+            updated[updated.length - 1] = {
+              role: "ai", 
+              content: `✅ **Rules Updated Successfully!**
+
+The following changes have been applied:
+${(pendingAction.data.changes || []).map(c => `• ${c.field}: Updated to ${c.newValue}`).join('\n')}
+
+📜 Update logged in audit trail
+📁 Document Reference: ${pendingAction.data.documentRef}
+
+The playbook now reflects the new rules. Is there anything else I can help with?`
+            };
+            return updated;
+          });
+          
+        } else {
+          throw new Error(result.error || "Failed to update rules");
+        }
+      }
+      
+    } catch (error) {
+      console.error("Pending action error:", error);
+      setChatMessages(p => {
+        const updated = [...p];
+        updated[updated.length - 1] = {
+          role: "ai", 
+          content: `⚠️ Error: ${error.message}
+
+The action could not be completed. Please try again or contact support.`
+        };
+        return updated;
+      });
+    }
+    
+    setPendingAction(null);
+  };
+
   const sendChat = async () => {
     if (!chatInput.trim()) return;
     const userMessage = chatInput.trim();
+    
+    // Check if this is a confirmation for pending action
+    if (pendingAction) {
+      const lowerMsg = userMessage.toLowerCase();
+      if (lowerMsg === 'yes' || lowerMsg === 'y' || lowerMsg === 'ok' || lowerMsg === 'confirm') {
+        setChatInput("");
+        await handlePendingActionConfirm(true);
+        return;
+      } else if (lowerMsg === 'no' || lowerMsg === 'n' || lowerMsg === 'cancel') {
+        setChatInput("");
+        await handlePendingActionConfirm(false);
+        return;
+      }
+      // If not yes/no, clear pending action and process as normal message
+      setPendingAction(null);
+    }
+    
     setChatMessages(p => [...p, {role: "user", content: userMessage}]);
     setChatInput("");
     
@@ -3252,7 +3820,7 @@ ${auditLines}
         }}
       />
       
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFile} />
+      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFile} accept="image/*,.pdf,.txt,text/plain,application/pdf" />
 
       {/* Sidebar */}
       <div className="sidebar flex flex-col items-center py-4 gap-2">
@@ -4389,26 +4957,68 @@ ${auditLines}
             {phase === "working" && module === "intake" && (
               <div className="max-w-4xl fade-in">
                 <h2 className="text-xl font-bold mb-1">🎯 Smart Intake</h2>
-                <p className="text-slate-500 mb-6">Upload a document and I'll detect the activity and guide you through it</p>
+                <p className="text-slate-500 mb-6">Upload a document (image, PDF, or text) and I'll extract text and detect the activity</p>
 
                 <div 
                   className="card mb-6 border-2 border-dashed border-green-200 bg-green-50/50 cursor-pointer hover:bg-green-50 text-center"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => !isLoading && fileInputRef.current?.click()}
                 >
                   {isLoading ? (
-                    <div className="py-4">
-                      <div className="animate-spin w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full mx-auto mb-3"></div>
-                      <p className="text-green-600 font-medium">Analyzing document...</p>
-                      <p className="text-sm text-slate-500">Detecting activity type and extracting data</p>
+                    <div className="py-6">
+                      <div className="w-16 h-16 mx-auto mb-4 relative">
+                        <svg className="w-16 h-16 transform -rotate-90">
+                          <circle cx="32" cy="32" r="28" stroke="#e2e8f0" strokeWidth="4" fill="none" />
+                          <circle 
+                            cx="32" cy="32" r="28" 
+                            stroke="#22c55e" 
+                            strokeWidth="4" 
+                            fill="none"
+                            strokeDasharray={`${ocrProgress * 1.76} 176`}
+                            className="transition-all duration-300"
+                          />
+                        </svg>
+                        <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-green-600">
+                          {ocrProgress}%
+                        </span>
+                      </div>
+                      <p className="text-green-600 font-medium">{ocrStatus || "Processing..."}</p>
+                      <p className="text-sm text-slate-500 mt-1">
+                        {ocrProgress < 30 ? "Initializing OCR engine..." :
+                         ocrProgress < 90 ? "Extracting text from document..." :
+                         "Analyzing content..."}
+                      </p>
                     </div>
                   ) : (
                     <>
                       <Icon name="FileSearch" size={40} className="mx-auto text-green-400 mb-3" />
                       <p className="font-medium">Upload document to detect activity</p>
-                      <p className="text-sm text-slate-500 mt-1">AFE, Budget Request, Status Check, etc.</p>
+                      <p className="text-sm text-slate-500 mt-1">Supports: Images (JPG, PNG), PDF, Text files</p>
+                      <p className="text-xs text-slate-400 mt-2">OCR supports English and Thai</p>
                     </>
                   )}
                 </div>
+                
+                {/* Extracted Text Preview */}
+                {extractedText && !isLoading && (
+                  <div className="card mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold flex items-center gap-2">
+                        <Icon name="FileText" size={18} className="text-blue-500" />
+                        Extracted Text (OCR)
+                      </h3>
+                      <button 
+                        onClick={() => navigator.clipboard.writeText(extractedText)}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        <Icon name="Copy" size={14} className="mr-1" /> Copy
+                      </button>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3 max-h-48 overflow-y-auto">
+                      <pre className="text-xs text-slate-600 whitespace-pre-wrap font-mono">{extractedText.substring(0, 2000)}{extractedText.length > 2000 ? "..." : ""}</pre>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-2">{extractedText.length} characters extracted</p>
+                  </div>
+                )}
 
                 {intakeResult && (
                   <div className="space-y-4 fade-in">
@@ -9527,20 +10137,32 @@ ${auditLines}
               <h3 className="font-semibold flex items-center gap-2">
                 <Icon name="MessageSquare" size={18} className="text-blue-600" /> PtA Assistant
               </h3>
-              <p className="text-xs text-slate-500 mt-1">Ask me anything about the playbook</p>
+              <p className="text-xs text-slate-500 mt-1">Ask anything or upload documents for analysis</p>
             </div>
             <div className="flex-1 overflow-auto p-4 space-y-3">
               {chatMessages.map((m, i) => (
                 <div key={i} className={`chat-bubble ${m.role === "user" ? "chat-user" : "chat-ai"}`}>
-                  {m.role === "user" ? m.content : (
+                  {m.isButton ? (
+                    <button 
+                      onClick={m.buttonAction}
+                      className="btn btn-primary btn-sm w-full"
+                    >
+                      <Icon name="ArrowRight" size={14} className="mr-1" /> Go to Tasks
+                    </button>
+                  ) : m.attachment ? (
+                    <div className="flex items-center gap-2">
+                      <Icon name="FileText" size={16} className="text-blue-500" />
+                      <span>{m.content}</span>
+                    </div>
+                  ) : m.role === "user" ? m.content : (
                     <div 
                       style={{whiteSpace: "pre-wrap", lineHeight: "1.6"}}
                       dangerouslySetInnerHTML={{
                         __html: m.content
                           // Remove any ** markdown
-                          .replace(/\*\*([^*]+)\*\*/g, '$1')
+                          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
                           // Remove any * markdown  
-                          .replace(/\*([^*]+)\*/g, '$1')
+                          .replace(/\*([^*]+)\*/g, '<em>$1</em>')
                           // Remove ## headers
                           .replace(/^#{1,3} /gm, '')
                           // Convert ``` code blocks
@@ -9552,19 +10174,80 @@ ${auditLines}
                   )}
                 </div>
               ))}
+              
+              {/* Pending Action Buttons */}
+              {pendingAction && (
+                <div className="flex gap-2 mt-2">
+                  <button 
+                    onClick={() => handlePendingActionConfirm(true)}
+                    className="btn btn-primary btn-sm flex-1"
+                  >
+                    <Icon name="Check" size={14} className="mr-1" /> Yes, proceed
+                  </button>
+                  <button 
+                    onClick={() => handlePendingActionConfirm(false)}
+                    className="btn btn-secondary btn-sm flex-1"
+                  >
+                    <Icon name="X" size={14} className="mr-1" /> No, cancel
+                  </button>
+                </div>
+              )}
+              
+              {/* Upload Progress */}
+              {chatUploadStatus && (
+                <div className="bg-blue-50 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="animate-spin">
+                      <Icon name="Loader" size={16} className="text-blue-500" />
+                    </div>
+                    <span className="text-sm text-blue-700">{chatUploadStatus}</span>
+                  </div>
+                  {chatUploadProgress > 0 && (
+                    <div className="h-1.5 bg-blue-200 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-500 transition-all duration-300"
+                        style={{width: `${chatUploadProgress}%`}}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              
               <div ref={chatEndRef} />
             </div>
-            <div className="p-4 border-t flex gap-2">
+            <div className="p-4 border-t">
+              {/* File upload input (hidden) */}
               <input 
-                className="input flex-1" 
-                placeholder="Ask anything..." 
-                value={chatInput} 
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && sendChat()}
+                type="file" 
+                ref={chatFileInputRef} 
+                className="hidden" 
+                onChange={handleChatFileUpload}
+                accept="image/*,.pdf,.txt,.csv,text/plain,application/pdf"
               />
-              <button onClick={sendChat} className="btn btn-primary px-3">
-                <Icon name="Send" size={18} />
-              </button>
+              
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => chatFileInputRef.current?.click()}
+                  className="btn btn-secondary px-3"
+                  title="Upload document for analysis"
+                  disabled={!!chatUploadStatus}
+                >
+                  <Icon name="Paperclip" size={18} />
+                </button>
+                <input 
+                  className="input flex-1" 
+                  placeholder={pendingAction ? "Type yes/no to confirm..." : "Ask anything..."} 
+                  value={chatInput} 
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && sendChat()}
+                />
+                <button onClick={sendChat} className="btn btn-primary px-3">
+                  <Icon name="Send" size={18} />
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 mt-2 text-center">
+                📎 Upload AFE, FCCR, DOAG, or any document
+              </p>
             </div>
           </div>
         </div>
