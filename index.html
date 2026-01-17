@@ -16,6 +16,10 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <!-- Excel file support -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Word document support -->
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
     *{font-family:'Inter',-apple-system,sans-serif;box-sizing:border-box}
@@ -2562,12 +2566,8 @@ const App = () => {
       const fileType = f.type;
       const fileName = f.name.toLowerCase();
       
-      // Upload to Google Drive in background (don't wait for it)
-      uploadToGoogleDrive(f, {
-        category: "Intake",
-        description: "Uploaded via Smart Intake",
-        tags: ["intake", "document"]
-      }).then(result => {
+      // Upload to Google Drive in background (simple backup - no tracking sheet)
+      uploadToGoogleDrive(f).then(result => {
         if (result.success) {
           console.log("✅ Document saved to Google Drive:", result.driveUrl);
         } else {
@@ -2586,7 +2586,6 @@ const App = () => {
       } else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
         // PDF file - convert to images then OCR
         setOcrStatus("Processing PDF...");
-        // Set PDF.js worker
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
         text = await processPDF(f);
         
@@ -2597,8 +2596,52 @@ const App = () => {
         text = await f.text();
         setOcrProgress(100);
         
+      } else if (fileName.endsWith('.csv') || fileType === 'text/csv') {
+        // CSV file - read as text
+        setOcrStatus("Reading CSV file...");
+        setOcrProgress(50);
+        text = await f.text();
+        setOcrProgress(100);
+        
+      } else if (fileName.match(/\.(xlsx|xls)$/) || fileType.includes('spreadsheet') || fileType.includes('excel')) {
+        // Excel file - use SheetJS library
+        setOcrStatus("Processing Excel file...");
+        setOcrProgress(30);
+        
+        const arrayBuffer = await f.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, {type: 'array'});
+        
+        // Convert all sheets to text
+        let allText = [];
+        workbook.SheetNames.forEach(sheetName => {
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          allText.push(`=== Sheet: ${sheetName} ===\n${csv}`);
+        });
+        
+        text = allText.join('\n\n');
+        setOcrProgress(100);
+        
+      } else if (fileName.match(/\.(docx|doc)$/) || fileType.includes('word')) {
+        // Word file - use mammoth library for .docx
+        setOcrStatus("Processing Word document...");
+        setOcrProgress(30);
+        
+        if (fileName.endsWith('.docx')) {
+          const arrayBuffer = await f.arrayBuffer();
+          const result = await mammoth.extractRawText({arrayBuffer: arrayBuffer});
+          text = result.value;
+        } else {
+          // .doc files are harder - just note it's uploaded
+          text = "[Legacy .doc file - content saved to Google Drive. Please use .docx for text extraction]";
+        }
+        setOcrProgress(100);
+        
       } else {
-        throw new Error("Unsupported file type. Please upload an image, PDF, or text file.");
+        // Unknown file type - still upload to Drive but can't extract text
+        setOcrStatus("Uploading file...");
+        text = `[File uploaded: ${f.name}]\nFile type: ${fileType || 'unknown'}\nSize: ${(f.size / 1024).toFixed(2)} KB\n\nNote: Text extraction not supported for this file type. File has been saved to Google Drive.`;
+        setOcrProgress(100);
       }
       
       setExtractedText(text);
@@ -3339,6 +3382,7 @@ Please check that the backend is configured in Admin settings.`
   
   // Working modules - Base list without Admin  
   const workingModulesBase = [
+    {id: "prerequisites", icon: "ClipboardCheck", label: "Prerequisites"},
     {id: "intake", icon: "Upload", label: "Smart Intake"},
     {id: "tasks", icon: "ClipboardList", label: "Tasks"},
     {id: "documents", icon: "FileText", label: "Document Tracking"},
@@ -3375,6 +3419,165 @@ Please check that the backend is configured in Admin settings.`
      description: "When creating asset master, the asset class automatically determines depreciation key. Changing depreciation method requires changing asset class.",
      rootCause: "Training gap", solution: "Added to new user onboarding",
      createdBy: "Lisa Wang", createdAt: "2024-01-22", tags: ["asset", "depreciation", "master data"], upvotes: 5}
+  ]);
+
+  // ========== PREREQUISITES STATE ==========
+  const [prerequisitesData, setPrerequisitesData] = useState({
+    // Categories of prerequisites
+    categories: [
+      {
+        id: "sap_config",
+        name: "SAP Configuration",
+        icon: "Server",
+        description: "Core SAP system setup required before migration",
+        items: [
+          {id: "business_entity", name: "Business Entity", question: "Is the Business Entity set up in SAP?", 
+           helpText: "Company code, controlling area, and organizational structure", status: null, notes: "", 
+           ifYes: "Use existing entity configuration", ifNo: "Request SAP Basis team to create new entity"},
+          {id: "gl_accounts", name: "GL Accounts", question: "Are GL Accounts mapped and available?",
+           helpText: "General Ledger accounts for project postings (cost elements, settlement accounts)", status: null, notes: "",
+           ifYes: "Verify account assignments match requirements", ifNo: "Work with Finance to create/map GL accounts"},
+          {id: "cost_centers", name: "Cost Centers", question: "Are Cost Centers configured?",
+           helpText: "Cost centers for overhead allocation and reporting", status: null, notes: "",
+           ifYes: "Confirm cost center hierarchy is correct", ifNo: "Create cost center structure in KS01"},
+          {id: "profit_centers", name: "Profit Centers", question: "Are Profit Centers set up?",
+           helpText: "Profit centers for profitability analysis", status: null, notes: "",
+           ifYes: "Map projects to appropriate profit centers", ifNo: "Create profit center structure in KE51"},
+          {id: "controlling_area", name: "Controlling Area", question: "Is the Controlling Area assigned?",
+           helpText: "Controlling area links cost accounting to organizational units", status: null, notes: "",
+           ifYes: "Verify controlling area settings", ifNo: "Assign controlling area in transaction OKKP"}
+        ]
+      },
+      {
+        id: "master_data",
+        name: "Master Data",
+        icon: "Database",
+        description: "Master data tables and configuration",
+        items: [
+          {id: "project_profile", name: "Project Profile", question: "Does a Project Profile exist for this country?",
+           helpText: "Project profile controls project behavior (status, planning, budgeting)", status: null, notes: "",
+           ifYes: "Review if existing profile meets requirements", ifNo: "Create new project profile or copy from similar country"},
+          {id: "network_profile", name: "Network Profile", question: "Is Network Profile configured?",
+           helpText: "Network profile for scheduling and capacity planning", status: null, notes: "",
+           ifYes: "Verify network settings", ifNo: "Configure network profile in SPRO"},
+          {id: "budget_profile", name: "Budget Profile", question: "Is Budget Profile set up?",
+           helpText: "Controls budget versions, currency, and tolerances", status: null, notes: "",
+           ifYes: "Confirm budget settings match requirements", ifNo: "Create budget profile in OPS9"},
+          {id: "settlement_profile", name: "Settlement Profile", question: "Is Settlement Profile configured?",
+           helpText: "Defines settlement rules and receivers", status: null, notes: "",
+           ifYes: "Review settlement receiver types", ifNo: "Configure settlement profile in OKO7"},
+          {id: "wbs_naming", name: "WBS Naming Convention", question: "Is WBS naming convention defined?",
+           helpText: "Standard naming format for WBS elements (e.g., 6XX/YYNNN)", status: null, notes: "",
+           ifYes: "Document the naming convention", ifNo: "Define naming convention with business"}
+        ]
+      },
+      {
+        id: "historical_data",
+        name: "Historical Data",
+        icon: "History",
+        description: "Existing data that may need migration",
+        items: [
+          {id: "existing_projects", name: "Existing Projects", question: "Are there existing projects to migrate?",
+           helpText: "Active or historical projects that need to be brought into the new system", status: null, notes: "",
+           ifYes: "Create migration list with project details", ifNo: "Fresh start - no project migration needed"},
+          {id: "open_pos", name: "Open Purchase Orders", question: "Are there open POs to migrate?",
+           helpText: "Purchase orders with pending deliveries or invoices", status: null, notes: "",
+           ifYes: "Document open PO values and expected receipts", ifNo: "No PO cutover required"},
+          {id: "asset_history", name: "Asset History", question: "Is there asset history to migrate?",
+           helpText: "Asset depreciation history and values", status: null, notes: "",
+           ifYes: "Extract asset values and depreciation schedules", ifNo: "Assets will start fresh"},
+          {id: "commitments", name: "Commitments", question: "Are there outstanding commitments?",
+           helpText: "Committed costs not yet invoiced", status: null, notes: "",
+           ifYes: "Document commitment values by project", ifNo: "No commitment migration needed"}
+        ]
+      },
+      {
+        id: "country_specific",
+        name: "Country-Specific",
+        icon: "Globe",
+        description: "Country-specific requirements and variations",
+        items: [
+          {id: "local_currency", name: "Local Currency", question: "Is local currency configured?",
+           helpText: "Currency for local reporting and transactions", status: null, notes: "",
+           ifYes: "Verify exchange rate type and update frequency", ifNo: "Configure local currency in OB08"},
+          {id: "exchange_rates", name: "Exchange Rates", question: "Are exchange rate types defined?",
+           helpText: "Exchange rate types for budget vs actual (e.g., DOAG rate)", status: null, notes: "",
+           ifYes: "Confirm rate type and source", ifNo: "Define exchange rate type and maintenance schedule"},
+          {id: "tax_codes", name: "Tax Codes", question: "Are tax codes set up?",
+           helpText: "Tax codes for input/output tax on purchases", status: null, notes: "",
+           ifYes: "Map tax codes to transaction types", ifNo: "Work with Tax team to configure"},
+          {id: "approval_thresholds", name: "Approval Thresholds", question: "Are approval thresholds defined?",
+           helpText: "Local currency thresholds for approvals (Tax, JV, OBO)", status: null, notes: "",
+           ifYes: "Document threshold values", ifNo: "Define thresholds with Finance leadership"},
+          {id: "jv_partners", name: "JV Partners", question: "Are JV partner details configured?",
+           helpText: "Joint venture partner codes and percentages", status: null, notes: "",
+           ifYes: "Verify partner codes and current percentages", ifNo: "Set up JV partner master data"}
+        ]
+      },
+      {
+        id: "interfaces",
+        name: "Interfaces & Integration",
+        icon: "Link",
+        description: "System interfaces and integrations",
+        items: [
+          {id: "dataflex", name: "Dataflex Integration", question: "Is Dataflex interface configured?",
+           helpText: "Interface for TC code generation (capital projects)", status: null, notes: "",
+           ifYes: "Test TC code generation", ifNo: "Work with IT to configure Dataflex interface"},
+          {id: "fccr_system", name: "FCCR System", question: "Is FCCR system integrated?",
+           helpText: "Funding Capital Change Request system for approvals", status: null, notes: "",
+           ifYes: "Verify FCCR workflow routing", ifNo: "Configure FCCR integration"},
+          {id: "doag_system", name: "DOAG Integration", question: "Is DOAG system connected?",
+           helpText: "Delegation of Authority system for budget approvals", status: null, notes: "",
+           ifYes: "Test approval routing", ifNo: "Set up DOAG integration"},
+          {id: "reporting", name: "Reporting Tools", question: "Are reporting tools configured?",
+           helpText: "BW/BI reports, dashboards for project monitoring", status: null, notes: "",
+           ifYes: "Verify report access and data", ifNo: "Configure reporting extractors"}
+        ]
+      }
+    ]
+  });
+  
+  const [prereqSelectedCategory, setPrereqSelectedCategory] = useState("sap_config");
+  const [prereqShowSummary, setPrereqShowSummary] = useState(false);
+  
+  // Calculate prerequisites completion
+  const getPrereqStats = () => {
+    let total = 0;
+    let completed = 0;
+    let yesCount = 0;
+    let noCount = 0;
+    let pendingCount = 0;
+    
+    prerequisitesData.categories.forEach(cat => {
+      cat.items.forEach(item => {
+        total++;
+        if (item.status === "yes") { completed++; yesCount++; }
+        else if (item.status === "no") { completed++; noCount++; }
+        else { pendingCount++; }
+      });
+    });
+    
+    return { total, completed, yesCount, noCount, pendingCount, percent: Math.round((completed / total) * 100) };
+  };
+  
+  // Update prerequisite status
+  const updatePrereqStatus = (categoryId, itemId, status, notes = "") => {
+    setPrerequisitesData(prev => ({
+      ...prev,
+      categories: prev.categories.map(cat => 
+        cat.id === categoryId 
+          ? {
+              ...cat,
+              items: cat.items.map(item => 
+                item.id === itemId 
+                  ? {...item, status, notes: notes || item.notes}
+                  : item
+              )
+            }
+          : cat
+      )
+    }));
+  };
   ]);
   const [showAddLesson, setShowAddLesson] = useState(false);
   const [lessonFilter, setLessonFilter] = useState({category: "all", severity: "all", module: "all"});
@@ -3861,8 +4064,8 @@ ${auditLines}
     return {success: true, user: newUser, usingLocalStorage: true};
   };
   
-  // ========== GOOGLE DRIVE DOCUMENT UPLOAD ==========
-  const uploadToGoogleDrive = async (file, metadata = {}) => {
+  // ========== GOOGLE DRIVE DOCUMENT UPLOAD (Simple Backup) ==========
+  const uploadToGoogleDrive = async (file) => {
     if (!currentUser) {
       console.log("No user logged in, skipping Drive upload");
       return {success: false, error: "User not logged in"};
@@ -3880,21 +4083,16 @@ ${auditLines}
         reader.readAsDataURL(file);
       });
       
-      // Upload to backend
+      // Upload to backend (simple save to Drive + log to AuditLog)
       const response = await fetch(HARDCODED_BACKEND_URL, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
-          action: "UPLOAD_DOCUMENT",
+          action: "UPLOAD_TO_DRIVE",
           fileName: file.name,
           fileContent: base64Content,
-          fileType: file.type,
-          userId: currentUser.id,
-          metadata: {
-            category: metadata.category || "General",
-            description: metadata.description || "",
-            tags: metadata.tags || []
-          }
+          fileType: file.type || "application/octet-stream",
+          userId: currentUser.id
         })
       });
       
@@ -3909,26 +4107,6 @@ ${auditLines}
     } catch (error) {
       console.error("Drive upload error:", error);
       return {success: false, error: error.message};
-    }
-  };
-  
-  // Get user's documents from Google Drive
-  const getMyDocuments = async () => {
-    if (!currentUser) return {success: false, documents: []};
-    
-    try {
-      const response = await fetch(HARDCODED_BACKEND_URL, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          action: "GET_DOCUMENTS",
-          userId: currentUser.id
-        })
-      });
-      return await response.json();
-    } catch (error) {
-      console.error("Get documents error:", error);
-      return {success: false, documents: []};
     }
   };
   
@@ -4208,7 +4386,7 @@ ${auditLines}
         }}
       />
       
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFile} accept="image/*,.pdf,.txt,text/plain,application/pdf" />
+      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFile} accept="image/*,.pdf,.txt,.csv,.xlsx,.xls,.doc,.docx,text/plain,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
 
       {/* Sidebar */}
       <div className="sidebar flex flex-col items-center py-4 gap-2">
@@ -5336,6 +5514,305 @@ ${auditLines}
             )}
 
             {/* ========== WORKING PHASE MODULES ========== */}
+
+            {/* PREREQUISITES MODULE */}
+            {phase === "working" && module === "prerequisites" && (
+              <div className="max-w-5xl fade-in">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-xl font-bold flex items-center gap-2">
+                      <Icon name="ClipboardCheck" size={24} className="text-blue-600" />
+                      Prerequisites Checklist
+                    </h2>
+                    <p className="text-slate-500 mt-1">Complete these checks before starting migration tasks for {selectedCountry.flag} {selectedCountry.name}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setPrereqShowSummary(!prereqShowSummary)}
+                      className={`btn ${prereqShowSummary ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    >
+                      <Icon name="FileText" size={14} className="mr-1" />
+                      {prereqShowSummary ? "Hide Summary" : "View Summary"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress Overview */}
+                <div className="card mb-6 bg-gradient-to-r from-blue-50 to-indigo-50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-slate-600 mb-1">Overall Progress</p>
+                      <p className="text-2xl font-bold text-blue-700">{getPrereqStats().percent}% Complete</p>
+                    </div>
+                    <div className="flex gap-6">
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-green-600">{getPrereqStats().yesCount}</p>
+                        <p className="text-xs text-slate-500">Ready</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-amber-600">{getPrereqStats().noCount}</p>
+                        <p className="text-xs text-slate-500">Action Needed</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-slate-400">{getPrereqStats().pendingCount}</p>
+                        <p className="text-xs text-slate-500">Pending</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 h-3 bg-slate-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-green-500 to-blue-500 transition-all duration-500"
+                      style={{width: `${getPrereqStats().percent}%`}}
+                    />
+                  </div>
+                </div>
+
+                {/* Summary View */}
+                {prereqShowSummary && (
+                  <div className="card mb-6 bg-white">
+                    <h3 className="font-semibold mb-4 flex items-center gap-2">
+                      <Icon name="FileText" size={18} /> Prerequisites Summary Report
+                    </h3>
+                    <div className="space-y-4">
+                      {prerequisitesData.categories.map(cat => {
+                        const catYes = cat.items.filter(i => i.status === "yes").length;
+                        const catNo = cat.items.filter(i => i.status === "no").length;
+                        const catPending = cat.items.filter(i => !i.status).length;
+                        
+                        return (
+                          <div key={cat.id} className="border rounded-lg p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="font-medium flex items-center gap-2">
+                                <Icon name={cat.icon} size={16} className="text-blue-600" />
+                                {cat.name}
+                              </h4>
+                              <div className="flex gap-2 text-sm">
+                                <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded">{catYes} Ready</span>
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded">{catNo} Action</span>
+                                <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded">{catPending} Pending</span>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              {cat.items.filter(item => item.status === "no").map(item => (
+                                <div key={item.id} className="flex items-start gap-2 p-2 bg-amber-50 rounded text-sm">
+                                  <Icon name="AlertTriangle" size={14} className="text-amber-600 mt-0.5" />
+                                  <div>
+                                    <p className="font-medium text-amber-800">{item.name}</p>
+                                    <p className="text-amber-600">{item.ifNo}</p>
+                                    {item.notes && <p className="text-slate-500 mt-1">Notes: {item.notes}</p>}
+                                  </div>
+                                </div>
+                              ))}
+                              {cat.items.filter(item => item.status === "yes").map(item => (
+                                <div key={item.id} className="flex items-start gap-2 p-2 bg-green-50 rounded text-sm">
+                                  <Icon name="CheckCircle" size={14} className="text-green-600 mt-0.5" />
+                                  <div>
+                                    <p className="font-medium text-green-800">{item.name}</p>
+                                    <p className="text-green-600">{item.ifYes}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
+                    {/* Export/Print Button */}
+                    <div className="mt-4 pt-4 border-t flex justify-end">
+                      <button 
+                        onClick={() => {
+                          const report = prerequisitesData.categories.map(cat => {
+                            const items = cat.items.map(item => 
+                              `  ${item.status === "yes" ? "✅" : item.status === "no" ? "⚠️" : "⬜"} ${item.name}: ${item.status || "Pending"}${item.notes ? ` (${item.notes})` : ""}`
+                            ).join("\n");
+                            return `${cat.name}\n${items}`;
+                          }).join("\n\n");
+                          
+                          const blob = new Blob([`Prerequisites Report - ${selectedCountry.name}\n${"=".repeat(50)}\n\n${report}`], {type: "text/plain"});
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `Prerequisites_${selectedCountry.id}_${new Date().toISOString().split("T")[0]}.txt`;
+                          a.click();
+                        }}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        <Icon name="Download" size={14} className="mr-1" /> Export Report
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Main Content */}
+                <div className="flex gap-6">
+                  {/* Category Sidebar */}
+                  <div className="w-64 flex-shrink-0">
+                    <div className="card p-2">
+                      {prerequisitesData.categories.map(cat => {
+                        const catItems = cat.items;
+                        const catCompleted = catItems.filter(i => i.status).length;
+                        const catTotal = catItems.length;
+                        const hasIssues = catItems.some(i => i.status === "no");
+                        
+                        return (
+                          <button
+                            key={cat.id}
+                            onClick={() => setPrereqSelectedCategory(cat.id)}
+                            className={`w-full p-3 rounded-lg text-left mb-1 transition-all ${
+                              prereqSelectedCategory === cat.id 
+                                ? 'bg-blue-600 text-white' 
+                                : 'hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Icon name={cat.icon} size={18} />
+                                <span className="font-medium text-sm">{cat.name}</span>
+                              </div>
+                              {hasIssues && prereqSelectedCategory !== cat.id && (
+                                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                              )}
+                            </div>
+                            <div className={`text-xs mt-1 ${prereqSelectedCategory === cat.id ? 'text-blue-100' : 'text-slate-400'}`}>
+                              {catCompleted}/{catTotal} completed
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Checklist Items */}
+                  <div className="flex-1">
+                    {prerequisitesData.categories
+                      .filter(cat => cat.id === prereqSelectedCategory)
+                      .map(cat => (
+                        <div key={cat.id}>
+                          <div className="mb-4">
+                            <h3 className="text-lg font-semibold flex items-center gap-2">
+                              <Icon name={cat.icon} size={20} className="text-blue-600" />
+                              {cat.name}
+                            </h3>
+                            <p className="text-sm text-slate-500">{cat.description}</p>
+                          </div>
+                          
+                          <div className="space-y-4">
+                            {cat.items.map((item, idx) => (
+                              <div 
+                                key={item.id} 
+                                className={`card border-l-4 ${
+                                  item.status === "yes" ? 'border-l-green-500 bg-green-50/30' :
+                                  item.status === "no" ? 'border-l-amber-500 bg-amber-50/30' :
+                                  'border-l-slate-300'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold">
+                                        {idx + 1}
+                                      </span>
+                                      <h4 className="font-semibold">{item.name}</h4>
+                                    </div>
+                                    <p className="text-slate-700 mb-2">{item.question}</p>
+                                    <p className="text-xs text-slate-400 mb-3">
+                                      <Icon name="HelpCircle" size={12} className="inline mr-1" />
+                                      {item.helpText}
+                                    </p>
+                                    
+                                    {/* Status Buttons */}
+                                    <div className="flex items-center gap-2 mb-3">
+                                      <button
+                                        onClick={() => updatePrereqStatus(cat.id, item.id, "yes")}
+                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                          item.status === "yes" 
+                                            ? 'bg-green-600 text-white' 
+                                            : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                        }`}
+                                      >
+                                        <Icon name="Check" size={14} className="inline mr-1" /> Yes
+                                      </button>
+                                      <button
+                                        onClick={() => updatePrereqStatus(cat.id, item.id, "no")}
+                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                          item.status === "no" 
+                                            ? 'bg-amber-600 text-white' 
+                                            : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                        }`}
+                                      >
+                                        <Icon name="X" size={14} className="inline mr-1" /> No
+                                      </button>
+                                      {item.status && (
+                                        <button
+                                          onClick={() => updatePrereqStatus(cat.id, item.id, null)}
+                                          className="px-3 py-2 rounded-lg text-sm text-slate-500 hover:bg-slate-100"
+                                        >
+                                          Reset
+                                        </button>
+                                      )}
+                                    </div>
+                                    
+                                    {/* Guidance based on answer */}
+                                    {item.status === "yes" && (
+                                      <div className="p-3 bg-green-100 rounded-lg text-sm">
+                                        <p className="font-medium text-green-800 flex items-center gap-1">
+                                          <Icon name="CheckCircle" size={14} /> Next Step:
+                                        </p>
+                                        <p className="text-green-700">{item.ifYes}</p>
+                                      </div>
+                                    )}
+                                    {item.status === "no" && (
+                                      <div className="p-3 bg-amber-100 rounded-lg text-sm">
+                                        <p className="font-medium text-amber-800 flex items-center gap-1">
+                                          <Icon name="AlertTriangle" size={14} /> Action Required:
+                                        </p>
+                                        <p className="text-amber-700">{item.ifNo}</p>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Notes Input */}
+                                    {item.status && (
+                                      <div className="mt-3">
+                                        <input
+                                          type="text"
+                                          placeholder="Add notes (optional)..."
+                                          className="input text-sm w-full"
+                                          value={item.notes}
+                                          onChange={(e) => updatePrereqStatus(cat.id, item.id, item.status, e.target.value)}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* Bottom Navigation */}
+                <div className="mt-6 flex justify-between items-center">
+                  <div className="text-sm text-slate-500">
+                    {getPrereqStats().pendingCount > 0 
+                      ? `${getPrereqStats().pendingCount} items still need to be checked`
+                      : "✅ All prerequisites have been reviewed!"
+                    }
+                  </div>
+                  {getPrereqStats().percent === 100 && (
+                    <button 
+                      onClick={() => setModule("intake")}
+                      className="btn btn-primary"
+                    >
+                      Continue to Smart Intake <Icon name="ArrowRight" size={16} className="ml-2" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* INTAKE MODULE */}
             {phase === "working" && module === "intake" && (
