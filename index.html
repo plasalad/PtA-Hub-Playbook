@@ -2562,6 +2562,19 @@ const App = () => {
       const fileType = f.type;
       const fileName = f.name.toLowerCase();
       
+      // Upload to Google Drive in background (don't wait for it)
+      uploadToGoogleDrive(f, {
+        category: "Intake",
+        description: "Uploaded via Smart Intake",
+        tags: ["intake", "document"]
+      }).then(result => {
+        if (result.success) {
+          console.log("✅ Document saved to Google Drive:", result.driveUrl);
+        } else {
+          console.log("⚠️ Drive upload skipped:", result.error);
+        }
+      });
+      
       // Handle different file types
       if (fileType.startsWith('image/') || fileName.match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)) {
         // Image file - direct OCR
@@ -3846,6 +3859,77 @@ ${auditLines}
     localStorage.setItem("pta_playbook_users", JSON.stringify(storedUsers));
     
     return {success: true, user: newUser, usingLocalStorage: true};
+  };
+  
+  // ========== GOOGLE DRIVE DOCUMENT UPLOAD ==========
+  const uploadToGoogleDrive = async (file, metadata = {}) => {
+    if (!currentUser) {
+      console.log("No user logged in, skipping Drive upload");
+      return {success: false, error: "User not logged in"};
+    }
+    
+    try {
+      // Convert file to base64
+      const base64Content = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = reader.result.split(',')[1]; // Remove data:xxx;base64, prefix
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      
+      // Upload to backend
+      const response = await fetch(HARDCODED_BACKEND_URL, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          action: "UPLOAD_DOCUMENT",
+          fileName: file.name,
+          fileContent: base64Content,
+          fileType: file.type,
+          userId: currentUser.id,
+          metadata: {
+            category: metadata.category || "General",
+            description: metadata.description || "",
+            tags: metadata.tags || []
+          }
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log("Document uploaded to Drive:", result.fileName, result.driveUrl);
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error("Drive upload error:", error);
+      return {success: false, error: error.message};
+    }
+  };
+  
+  // Get user's documents from Google Drive
+  const getMyDocuments = async () => {
+    if (!currentUser) return {success: false, documents: []};
+    
+    try {
+      const response = await fetch(HARDCODED_BACKEND_URL, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          action: "GET_DOCUMENTS",
+          userId: currentUser.id
+        })
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Get documents error:", error);
+      return {success: false, documents: []};
+    }
   };
   
   const updateUserProgressAPI = async (userId, xpDelta, coinsDelta, newBadges) => {
