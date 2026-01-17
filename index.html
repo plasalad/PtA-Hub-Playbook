@@ -3728,52 +3728,61 @@ ${auditLines}
   const [loginForm, setLoginForm] = useState({username: "", password: ""});
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [usingLocalAuth, setUsingLocalAuth] = useState(false);
   const [users, setUsers] = useState([]);  // Will be loaded from backend
   
   // ========== ROLE-BASED ACCESS CONTROL ==========
   const isAdmin = currentUser?.role === "admin";
   
   // ========== USER API FUNCTIONS ==========
+  const localUsers = [
+    {id: "USR001", username: "admin", password: "admin123", displayName: "Admin User", role: "admin", 
+     xp: 2500, coins: 850, badges: ["early_adopter", "quiz_master", "contributor"], 
+     quizzesPlayed: 45, quizzesCreated: 12, correctAnswers: 38, streak: 5, joinedAt: "2024-01-01",
+     answeredQuestions: ["Q001", "Q002", "Q003"]},
+    {id: "USR002", username: "john", password: "john123", displayName: "John Smith", role: "user",
+     xp: 1200, coins: 320, badges: ["first_quiz", "5_streak"],
+     quizzesPlayed: 22, quizzesCreated: 3, correctAnswers: 18, streak: 2, joinedAt: "2024-01-10",
+     answeredQuestions: ["Q001", "Q002"]},
+    {id: "USR003", username: "sarah", password: "sarah123", displayName: "Sarah Lee", role: "user",
+     xp: 800, coins: 180, badges: ["contributor"],
+     quizzesPlayed: 15, quizzesCreated: 8, correctAnswers: 12, streak: 0, joinedAt: "2024-01-15",
+     answeredQuestions: []}
+  ];
+  
   const loginUserAPI = async (username, password) => {
-    if (!backendUrl) {
-      // Fallback to local auth if no backend configured
-      const localUsers = [
-        {id: "USR001", username: "admin", password: "admin123", displayName: "Admin User", role: "admin", 
-         xp: 2500, coins: 850, badges: ["early_adopter", "quiz_master", "contributor"], 
-         quizzesPlayed: 45, quizzesCreated: 12, correctAnswers: 38, streak: 5, joinedAt: "2024-01-01",
-         answeredQuestions: ["Q001", "Q002", "Q003"]},
-        {id: "USR002", username: "john", password: "john123", displayName: "John Smith", role: "user",
-         xp: 1200, coins: 320, badges: ["first_quiz", "5_streak"],
-         quizzesPlayed: 22, quizzesCreated: 3, correctAnswers: 18, streak: 2, joinedAt: "2024-01-10",
-         answeredQuestions: ["Q001", "Q002"]},
-        {id: "USR003", username: "sarah", password: "sarah123", displayName: "Sarah Lee", role: "user",
-         xp: 800, coins: 180, badges: ["contributor"],
-         quizzesPlayed: 15, quizzesCreated: 8, correctAnswers: 12, streak: 0, joinedAt: "2024-01-15",
-         answeredQuestions: []}
-      ];
-      const user = localUsers.find(u => u.username === username && u.password === password);
-      if (user) {
-        return {success: true, user};
+    // Try backend first if configured
+    if (backendUrl) {
+      try {
+        const response = await fetch(backendUrl, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({action: "LOGIN", username, password})
+        });
+        const result = await response.json();
+        if (result.success) {
+          return result;
+        }
+        // If backend returns error (not connection error), use that error
+        if (result.error && !result.error.includes("Connection")) {
+          return result;
+        }
+      } catch (error) {
+        console.log("Backend not available, using local auth");
       }
-      return {success: false, error: "Invalid username or password"};
     }
     
-    try {
-      const response = await fetch(backendUrl, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({action: "LOGIN", username, password})
-      });
-      return await response.json();
-    } catch (error) {
-      console.error("Login error:", error);
-      return {success: false, error: "Connection error. Please check backend configuration."};
+    // Fallback to local authentication
+    const user = localUsers.find(u => u.username === username && u.password === password);
+    if (user) {
+      return {success: true, user: {...user}, usingLocalAuth: true};
     }
+    return {success: false, error: "Invalid username or password"};
   };
   
   const registerUserAPI = async (username, password, displayName) => {
     if (!backendUrl) {
-      return {success: false, error: "Backend not configured. Cannot register new users."};
+      return {success: false, error: "Backend not configured. New user registration requires backend connection."};
     }
     
     try {
@@ -3785,7 +3794,7 @@ ${auditLines}
       return await response.json();
     } catch (error) {
       console.error("Register error:", error);
-      return {success: false, error: "Connection error"};
+      return {success: false, error: "Backend connection failed. Cannot register new users."};
     }
   };
   
@@ -3953,6 +3962,9 @@ ${auditLines}
                       if (result.success) {
                         setCurrentUser(result.user);
                         setLoginForm({username: "", password: ""});
+                        if (result.usingLocalAuth) {
+                          setUsingLocalAuth(true);
+                        }
                         loadQuizzesFromBackend();
                       } else {
                         setLoginError(result.error || "Login failed");
@@ -3971,6 +3983,9 @@ ${auditLines}
                   if (result.success) {
                     setCurrentUser(result.user);
                     setLoginForm({username: "", password: ""});
+                    if (result.usingLocalAuth) {
+                      setUsingLocalAuth(true);
+                    }
                     loadQuizzesFromBackend();
                   } else {
                     setLoginError(result.error || "Login failed");
