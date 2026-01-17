@@ -3321,8 +3321,8 @@ Please check that the backend is configured in Admin settings.`
     {id: "config", icon: "Settings", label: "Configure"}
   ];
   
-  // Working modules  
-  const workingModules = [
+  // Working modules - Base list without Admin  
+  const workingModulesBase = [
     {id: "intake", icon: "Upload", label: "Smart Intake"},
     {id: "tasks", icon: "ClipboardList", label: "Tasks"},
     {id: "documents", icon: "FileText", label: "Document Tracking"},
@@ -3333,9 +3333,13 @@ Please check that the backend is configured in Admin settings.`
     {id: "game", icon: "Gamepad2", label: "SAP Quest"},
     {id: "countries", icon: "Globe", label: "Countries"},
     {id: "analytics", icon: "BarChart3", label: "Analytics"},
-    {id: "audit", icon: "FileText", label: "Audit Trail"},
-    {id: "admin", icon: "Settings", label: "Admin"}
+    {id: "audit", icon: "FileText", label: "Audit Trail"}
   ];
+  
+  // Dynamically add Admin menu only for admin users
+  const workingModules = isAdmin 
+    ? [...workingModulesBase, {id: "admin", icon: "Settings", label: "Admin"}]
+    : workingModulesBase;
 
   // ========== LESSONS LEARNED STATE ==========
   const [lessonsLearned, setLessonsLearned] = useState([
@@ -3722,22 +3726,104 @@ ${auditLines}
   const [currentUser, setCurrentUser] = useState(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginForm, setLoginForm] = useState({username: "", password: ""});
-  const [users, setUsers] = useState([
-    {id: "USR001", username: "admin", password: "admin123", displayName: "Admin User", role: "admin", 
-     xp: 2500, level: 8, coins: 850, badges: ["early_adopter", "quiz_master", "contributor"], 
-     quizzesPlayed: 45, quizzesCreated: 12, correctAnswers: 38, streak: 5, joinedAt: "2024-01-01",
-     answeredQuestions: ["Q001", "Q002", "Q003"]},
-    {id: "USR002", username: "john", password: "john123", displayName: "John Smith", role: "user",
-     xp: 1200, level: 5, coins: 320, badges: ["first_quiz", "5_streak"],
-     quizzesPlayed: 22, quizzesCreated: 3, correctAnswers: 18, streak: 2, joinedAt: "2024-01-10",
-     answeredQuestions: ["Q001", "Q002"]},
-    {id: "USR003", username: "sarah", password: "sarah123", displayName: "Sarah Lee", role: "user",
-     xp: 800, level: 4, coins: 180, badges: ["contributor"],
-     quizzesPlayed: 15, quizzesCreated: 8, correctAnswers: 12, streak: 0, joinedAt: "2024-01-15",
-     answeredQuestions: []}
-  ]);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [users, setUsers] = useState([]);  // Will be loaded from backend
   
-  // Quiz System
+  // ========== ROLE-BASED ACCESS CONTROL ==========
+  const isAdmin = currentUser?.role === "admin";
+  
+  // ========== USER API FUNCTIONS ==========
+  const loginUserAPI = async (username, password) => {
+    if (!backendUrl) {
+      // Fallback to local auth if no backend configured
+      const localUsers = [
+        {id: "USR001", username: "admin", password: "admin123", displayName: "Admin User", role: "admin", 
+         xp: 2500, coins: 850, badges: ["early_adopter", "quiz_master", "contributor"], 
+         quizzesPlayed: 45, quizzesCreated: 12, correctAnswers: 38, streak: 5, joinedAt: "2024-01-01",
+         answeredQuestions: ["Q001", "Q002", "Q003"]},
+        {id: "USR002", username: "john", password: "john123", displayName: "John Smith", role: "user",
+         xp: 1200, coins: 320, badges: ["first_quiz", "5_streak"],
+         quizzesPlayed: 22, quizzesCreated: 3, correctAnswers: 18, streak: 2, joinedAt: "2024-01-10",
+         answeredQuestions: ["Q001", "Q002"]},
+        {id: "USR003", username: "sarah", password: "sarah123", displayName: "Sarah Lee", role: "user",
+         xp: 800, coins: 180, badges: ["contributor"],
+         quizzesPlayed: 15, quizzesCreated: 8, correctAnswers: 12, streak: 0, joinedAt: "2024-01-15",
+         answeredQuestions: []}
+      ];
+      const user = localUsers.find(u => u.username === username && u.password === password);
+      if (user) {
+        return {success: true, user};
+      }
+      return {success: false, error: "Invalid username or password"};
+    }
+    
+    try {
+      const response = await fetch(backendUrl, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({action: "LOGIN", username, password})
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Login error:", error);
+      return {success: false, error: "Connection error. Please check backend configuration."};
+    }
+  };
+  
+  const registerUserAPI = async (username, password, displayName) => {
+    if (!backendUrl) {
+      return {success: false, error: "Backend not configured. Cannot register new users."};
+    }
+    
+    try {
+      const response = await fetch(backendUrl, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({action: "REGISTER", username, password, displayName})
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Register error:", error);
+      return {success: false, error: "Connection error"};
+    }
+  };
+  
+  const updateUserProgressAPI = async (userId, xpDelta, coinsDelta, newBadges) => {
+    if (!backendUrl) return {success: false};
+    
+    try {
+      const response = await fetch(backendUrl, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({action: "UPDATE_USER_PROGRESS", userId, xp: xpDelta, coins: coinsDelta, badges: newBadges})
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Update progress error:", error);
+      return {success: false};
+    }
+  };
+  
+  const loadQuizzesFromBackend = async () => {
+    if (!backendUrl) return;
+    
+    try {
+      const response = await fetch(backendUrl, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({action: "GET_QUIZZES", filters: {}})
+      });
+      const result = await response.json();
+      if (result.success && result.quizzes) {
+        setQuizzes(result.quizzes);
+      }
+    } catch (error) {
+      console.error("Load quizzes error:", error);
+    }
+  };
+  
+  // Quiz System - now supports backend persistence
   const [quizzes, setQuizzes] = useState([
     {id: "Q001", question: "What T-Code is used to create a new project in SAP?", 
      options: ["CJ20N", "ME21N", "VA01", "FB01"], correctAnswer: 0, 
@@ -3807,6 +3893,159 @@ ${auditLines}
   };
 
   return (
+    <>
+    {/* ========== LOGIN SCREEN - Shows when not logged in ========== */}
+    {!currentUser ? (
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+        <div className="text-center">
+          {/* Logo and Title */}
+          <div className="mb-8">
+            <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-xl">
+              <Icon name="BookOpen" size={40} className="text-white" />
+            </div>
+            <h1 className="text-4xl font-bold text-white mb-2">PtA Migration Playbook</h1>
+            <p className="text-blue-300">AI-Powered Knowledge Management & SAP Workflow System</p>
+          </div>
+          
+          {/* Login Card */}
+          <div className="bg-slate-800/80 backdrop-blur rounded-2xl p-8 w-full max-w-md mx-auto border border-slate-700 shadow-2xl">
+            <h2 className="text-xl font-semibold text-white mb-6">Sign in to continue</h2>
+            
+            {/* Error message */}
+            {loginError && (
+              <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-300 text-sm">
+                {loginError}
+              </div>
+            )}
+            
+            <div className="space-y-4 text-left">
+              <div>
+                <label className="text-slate-300 text-sm mb-1 block">Username</label>
+                <input 
+                  className="w-full p-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-blue-400 outline-none"
+                  placeholder="Enter username"
+                  value={loginForm.username}
+                  onChange={e => {setLoginForm({...loginForm, username: e.target.value}); setLoginError("");}}
+                  disabled={loginLoading}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      document.getElementById("login-password-input")?.focus();
+                    }
+                  }}
+                />
+              </div>
+              <div>
+                <label className="text-slate-300 text-sm mb-1 block">Password</label>
+                <input 
+                  id="login-password-input"
+                  className="w-full p-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-blue-400 outline-none"
+                  type="password"
+                  placeholder="Enter password"
+                  value={loginForm.password}
+                  onChange={e => {setLoginForm({...loginForm, password: e.target.value}); setLoginError("");}}
+                  disabled={loginLoading}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter" && !loginLoading) {
+                      setLoginLoading(true);
+                      setLoginError("");
+                      const result = await loginUserAPI(loginForm.username, loginForm.password);
+                      setLoginLoading(false);
+                      if (result.success) {
+                        setCurrentUser(result.user);
+                        setLoginForm({username: "", password: ""});
+                        loadQuizzesFromBackend();
+                      } else {
+                        setLoginError(result.error || "Login failed");
+                      }
+                    }
+                  }}
+                />
+              </div>
+              
+              <button
+                onClick={async () => {
+                  setLoginLoading(true);
+                  setLoginError("");
+                  const result = await loginUserAPI(loginForm.username, loginForm.password);
+                  setLoginLoading(false);
+                  if (result.success) {
+                    setCurrentUser(result.user);
+                    setLoginForm({username: "", password: ""});
+                    loadQuizzesFromBackend();
+                  } else {
+                    setLoginError(result.error || "Login failed");
+                  }
+                }}
+                disabled={loginLoading}
+                className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loginLoading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                    </svg>
+                    Signing in...
+                  </>
+                ) : "Sign In"}
+              </button>
+              
+              <div className="relative flex items-center py-2">
+                <div className="flex-grow border-t border-slate-600"></div>
+                <span className="px-3 text-slate-500 text-sm">or</span>
+                <div className="flex-grow border-t border-slate-600"></div>
+              </div>
+              
+              <button
+                onClick={async () => {
+                  if (!loginForm.username || !loginForm.password) {
+                    setLoginError("Please enter both username and password");
+                    return;
+                  }
+                  if (loginForm.password.length < 4) {
+                    setLoginError("Password must be at least 4 characters");
+                    return;
+                  }
+                  
+                  setLoginLoading(true);
+                  setLoginError("");
+                  const result = await registerUserAPI(loginForm.username, loginForm.password, loginForm.username);
+                  setLoginLoading(false);
+                  
+                  if (result.success) {
+                    setCurrentUser(result.user);
+                    setLoginForm({username: "", password: ""});
+                    alert("🎉 Account created! Welcome to PtA Playbook!");
+                  } else {
+                    setLoginError(result.error || "Registration failed");
+                  }
+                }}
+                disabled={loginLoading}
+                className="w-full py-2 bg-transparent text-slate-300 hover:text-white border border-slate-500 rounded-lg hover:border-slate-400 transition-colors disabled:opacity-50"
+              >
+                Create New Account
+              </button>
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-slate-700">
+              <p className="text-slate-400 text-sm mb-2">Demo Accounts:</p>
+              <div className="flex justify-center gap-4 text-xs">
+                <span className="px-2 py-1 bg-amber-500/20 text-amber-400 rounded">🔐 admin / admin123</span>
+                <span className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded">👤 john / john123</span>
+              </div>
+              <p className="text-slate-500 text-xs mt-2">Admin users have access to Settings</p>
+              {!backendUrl && (
+                <p className="text-amber-400 text-xs mt-2">⚠️ Backend not configured - using local auth</p>
+              )}
+            </div>
+          </div>
+          
+          {/* Footer */}
+          <p className="text-slate-500 text-sm mt-8">PtA Hub Playbook © 2024</p>
+        </div>
+      </div>
+    ) : (
+    /* ========== MAIN APP - Shows when logged in ========== */
     <div className="h-screen flex">
       {/* Global Search Modal */}
       <GlobalSearch 
@@ -3918,24 +4157,20 @@ ${auditLines}
               </select>
             )}
             {/* User/Game Indicator */}
-            {currentUser ? (
+            {currentUser && (
               <div 
                 onClick={() => {setModule("game"); setGameMode("menu");}}
                 className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-purple-100 to-indigo-100 rounded-lg cursor-pointer hover:from-purple-200 hover:to-indigo-200"
               >
                 <span className="text-lg">🎮</span>
                 <div className="text-xs">
-                  <p className="font-bold text-purple-700">{currentUser.displayName}</p>
+                  <div className="flex items-center gap-1">
+                    <p className="font-bold text-purple-700">{currentUser.displayName}</p>
+                    {isAdmin && <span className="px-1.5 py-0.5 bg-amber-500 text-white text-[10px] rounded font-semibold">ADMIN</span>}
+                  </div>
                   <p className="text-purple-500">Lv.{getLevelFromXP(currentUser.xp)} • {currentUser.coins}🪙</p>
                 </div>
               </div>
-            ) : (
-              <button 
-                onClick={() => setShowLoginModal(true)}
-                className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 flex items-center gap-1"
-              >
-                <Icon name="LogIn" size={14} /> Login
-              </button>
             )}
             {currentUser && (
               <button 
@@ -9023,6 +9258,24 @@ ${auditLines}
             {/* ADMIN MODULE */}
             {phase === "working" && module === "admin" && (
               <div className="max-w-6xl fade-in">
+                {/* Admin Access Check */}
+                {!isAdmin ? (
+                  <div className="card text-center py-16">
+                    <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-red-100 flex items-center justify-center">
+                      <Icon name="ShieldX" size={40} className="text-red-500" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-slate-800 mb-2">Access Denied</h2>
+                    <p className="text-slate-500 mb-4">You don't have permission to access Admin settings.</p>
+                    <p className="text-sm text-slate-400">Please contact an administrator if you need access.</p>
+                    <button 
+                      onClick={() => setModule("intake")}
+                      className="btn btn-primary mt-6"
+                    >
+                      <Icon name="ArrowLeft" size={16} className="mr-2" /> Go Back
+                    </button>
+                  </div>
+                ) : (
+                <>
                 {/* Header */}
                 <div className="card mb-6 bg-gradient-to-r from-slate-800 to-slate-900 text-white">
                   <div className="flex items-center justify-between">
@@ -10127,6 +10380,8 @@ ${auditLines}
                     <p className="text-xs text-slate-400 mt-4">💡 FCCR approval is required for ALL projects including Decommissioning. Fund.IT ruling is only for EMIT (03).</p>
                   </div>
                 )}
+                </>
+                )}
               </div>
             )}
           </div>
@@ -10253,6 +10508,8 @@ ${auditLines}
         </div>
       </div>
     </div>
+    )}
+    </>
   );
 };
 
