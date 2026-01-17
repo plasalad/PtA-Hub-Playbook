@@ -3236,7 +3236,10 @@ Please check that the backend is configured in Admin settings.`
   const [adminData, setAdminData] = useState({});
   const [editingRow, setEditingRow] = useState(null);
   const [newRow, setNewRow] = useState({});
-  const [backendUrl, setBackendUrl] = useState(localStorage.getItem("sap_playbook_backend_url") || "");
+  
+  // Hardcoded backend URL - connects automatically
+  const HARDCODED_BACKEND_URL = "https://script.google.com/macros/s/AKfycbzIRsoFfOqHn-GsgxVMcrAjnaoTgT5GX38ip_EjVUAE0TfYfPqPFUMc6otfqoLBchAY/exec";
+  const [backendUrl, setBackendUrl] = useState(HARDCODED_BACKEND_URL);
   const [backendStatus, setBackendStatus] = useState("unknown"); // unknown, connected, disconnected
   
   // Wrapper function to call backend API with current URL
@@ -3735,7 +3738,8 @@ ${auditLines}
   const isAdmin = currentUser?.role === "admin";
   
   // ========== USER API FUNCTIONS ==========
-  const localUsers = [
+  // Default users (built-in)
+  const defaultUsers = [
     {id: "USR001", username: "admin", password: "admin123", displayName: "Admin User", role: "admin", 
      xp: 2500, coins: 850, badges: ["early_adopter", "quiz_master", "contributor"], 
      quizzesPlayed: 45, quizzesCreated: 12, correctAnswers: 38, streak: 5, joinedAt: "2024-01-01",
@@ -3750,26 +3754,34 @@ ${auditLines}
      answeredQuestions: []}
   ];
   
+  // Combine default users with any users stored in localStorage
+  const getStoredUsers = () => {
+    try {
+      return JSON.parse(localStorage.getItem("pta_playbook_users") || "[]");
+    } catch {
+      return [];
+    }
+  };
+  
+  const localUsers = [...defaultUsers, ...getStoredUsers()];
+  
   const loginUserAPI = async (username, password) => {
-    // Try backend first if configured
-    if (backendUrl) {
-      try {
-        const response = await fetch(backendUrl, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({action: "LOGIN", username, password})
-        });
-        const result = await response.json();
-        if (result.success) {
-          return result;
-        }
-        // If backend returns error (not connection error), use that error
-        if (result.error && !result.error.includes("Connection")) {
-          return result;
-        }
-      } catch (error) {
-        console.log("Backend not available, using local auth");
+    // Try backend first (now that we have hardcoded URL)
+    try {
+      const response = await fetch(HARDCODED_BACKEND_URL, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({action: "LOGIN", username, password})
+      });
+      const result = await response.json();
+      if (result.success) {
+        console.log("Logged in via backend:", result.user.displayName);
+        return result;
       }
+      // Backend auth failed - try local users
+      console.log("Backend auth failed, trying local:", result.error);
+    } catch (error) {
+      console.log("Backend not available, using local auth:", error.message);
     }
     
     // Fallback to local authentication
@@ -3777,25 +3789,63 @@ ${auditLines}
     if (user) {
       return {success: true, user: {...user}, usingLocalAuth: true};
     }
+    
     return {success: false, error: "Invalid username or password"};
   };
   
   const registerUserAPI = async (username, password, displayName) => {
-    if (!backendUrl) {
-      return {success: false, error: "Backend not configured. New user registration requires backend connection."};
-    }
-    
+    // Try backend registration first
     try {
-      const response = await fetch(backendUrl, {
+      const response = await fetch(HARDCODED_BACKEND_URL, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({action: "REGISTER", username, password, displayName})
       });
-      return await response.json();
+      const result = await response.json();
+      if (result.success) {
+        console.log("Registered via backend:", result.user.displayName);
+        // Also save to localStorage as backup
+        const storedUsers = JSON.parse(localStorage.getItem("pta_playbook_users") || "[]");
+        storedUsers.push(result.user);
+        localStorage.setItem("pta_playbook_users", JSON.stringify(storedUsers));
+        return result;
+      }
+      return result; // Return backend error
     } catch (error) {
-      console.error("Register error:", error);
-      return {success: false, error: "Backend connection failed. Cannot register new users."};
+      console.log("Backend registration failed, using localStorage:", error.message);
     }
+    
+    // Fallback: Save to localStorage only
+    // Check if username exists in local users
+    const allLocalUsers = [...localUsers, ...JSON.parse(localStorage.getItem("pta_playbook_users") || "[]")];
+    if (allLocalUsers.find(u => u.username === username)) {
+      return {success: false, error: "Username already exists"};
+    }
+    
+    // Create new user locally
+    const newUser = {
+      id: "USR" + Date.now(),
+      username,
+      password,
+      displayName: displayName || username,
+      role: "user",
+      xp: 0,
+      coins: 50,
+      badges: [],
+      quizzesPlayed: 0,
+      quizzesCreated: 0,
+      correctAnswers: 0,
+      streak: 0,
+      joinedAt: new Date().toISOString().split("T")[0],
+      answeredQuestions: []
+    };
+    
+    // Save to localStorage
+    const storedUsers = JSON.parse(localStorage.getItem("pta_playbook_users") || "[]");
+    storedUsers.push(newUser);
+    localStorage.setItem("pta_playbook_users", JSON.stringify(storedUsers));
+    
+    return {success: true, user: newUser, usingLocalStorage: true};
   };
   
   const updateUserProgressAPI = async (userId, xpDelta, coinsDelta, newBadges) => {
