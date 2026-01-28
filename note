@@ -1,0 +1,2836 @@
+/**
+
+- ============================================================
+- SAP PLAYBOOK - COMBINED GOOGLE APPS SCRIPT BACKEND
+- ============================================================
+- Version: 1.0
+- Last Updated: 2024
+- 
+- This file contains all backend functionality for:
+- - Configuration Management
+- - Signature Tracking
+- - Form Management
+- - Email Notifications
+- 
+- SETUP INSTRUCTIONS:
+- 1. Create a new Google Apps Script project
+- 1. Copy this entire file into Code.gs
+- 1. Run initAllSheets() once to create required sheets
+- 1. Deploy as Web App (Execute as: Me, Access: Anyone)
+- 1. Copy the deployment URL to your frontend BACKEND_URL
+- ============================================================
+  */
+
+// ============================================================
+// CONFIGURATION
+// ============================================================
+
+const CONFIG = {
+// Sheet names
+SHEETS: {
+CONFIG: “Config”,
+COUNTRIES: “Countries”,
+APPROVERS: “Approvers”,
+THRESHOLDS: “Thresholds”,
+FORMS: “Forms”,
+SIGNATURES: “Signatures”,
+AUDIT_LOG: “AuditLog”,
+USERS: “Users”,
+GAMIFICATION: “Gamification”,
+QUIZZES: “Quizzes”
+},
+
+// Google Drive folder for uploaded documents
+DRIVE_FOLDER_NAME: “PtA_Playbook_Documents”,
+
+// Default approval levels based on budget (USD)
+APPROVAL_LEVELS: {
+LEVEL_6: 1000000,      // Up to $1M
+LEVEL_5: 5000000,      // Up to $5M
+LEVEL_4: 20000000,     // Up to $20M
+LEVEL_3: 50000000,     // Up to $50M
+LEVEL_2: 100000000,    // Up to $100M
+LEVEL_1: Infinity      // Unlimited
+}
+};
+
+// ============================================================
+// WEB APP ENTRY POINTS
+// ============================================================
+
+/**
+
+- Handle GET requests (for testing)
+  */
+  function doGet(e) {
+  return ContentService.createTextOutput(JSON.stringify({
+  success: true,
+  message: “SAP Playbook Backend is running”,
+  version: “1.0”,
+  timestamp: new Date().toISOString()
+  })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+/**
+
+- Handle POST requests from frontend
+  */
+  function doPost(e) {
+  try {
+  const data = JSON.parse(e.postData.contents);
+  const action = data.action;
+  
+  // Log the request
+  logAction(action, data);
+  
+  let result;
+  
+  switch (action) {
+  // ===== INITIALIZATION =====
+  case “INIT_ALL_SHEETS”:
+  result = initAllSheets();
+  break;
+  case “INIT_CONFIG_SHEETS”:
+  result = initConfigSheets();
+  break;
+  case “INIT_SIGNATURE_SHEETS”:
+  result = initSignatureSheets();
+  break;
+  
+  // ===== CONFIGURATION =====
+  case “GET_CONFIG”:
+  result = getConfig(data.country);
+  break;
+  case “SAVE_CONFIG”:
+  result = saveConfig(data.country, data.config);
+  break;
+  case “GET_COUNTRIES”:
+  result = getCountries();
+  break;
+  case “GET_APPROVERS”:
+  result = getApprovers(data.level, data.country);
+  break;
+  case “GET_THRESHOLDS”:
+  result = getThresholds(data.country);
+  break;
+  
+  // ===== FORMS =====
+  case “CREATE_FORM”:
+  result = createForm(data);
+  break;
+  case “GET_FORMS”:
+  result = getForms(data.filters);
+  break;
+  case “GET_FORM”:
+  result = getForm(data.formId);
+  break;
+  case “UPDATE_FORM”:
+  result = updateForm(data.formId, data.updates);
+  break;
+  case “DELETE_FORM”:
+  result = deleteForm(data.formId);
+  break;
+  
+  // ===== SIGNATURES =====
+  case “SIGN_FORM”:
+  result = signForm(data);
+  break;
+  case “REVOKE_SIGNATURE”:
+  result = revokeSignature(data);
+  break;
+  case “GET_SIGNATURE_STATS”:
+  result = getSignatureStats();
+  break;
+  case “GET_PENDING_FOR_APPROVER”:
+  result = getPendingForApprover(data.email);
+  break;
+  
+  // ===== NOTIFICATIONS =====
+  case “SEND_SIGNATURE_REQUEST”:
+  result = sendSignatureRequest(data.formId, data.boxId, data.recipientEmail);
+  break;
+  case “SEND_REMINDER”:
+  result = sendPendingReminders();
+  break;
+  
+  // ===== AUDIT =====
+  case “GET_AUDIT_LOG”:
+  result = getAuditLog(data.filters);
+  break;
+  
+  // ===== AI CHAT (Gemini 2.5 Flash) =====
+  case “CHAT”:
+  result = handleChat(data.message, data.context);
+  break;
+  
+  // ===== DOCUMENT ANALYSIS (Librarian Mode) =====
+  case “ANALYZE_DOCUMENT”:
+  result = analyzeDocument(data.textContent, data.country, data.knowledgeBase);
+  break;
+  
+  // ===== SMART INTAKE - Analyze OCR Text =====
+  case “ANALYZE_INTAKE”:
+  result = analyzeIntakeDocument(data.text, data.fileName);
+  break;
+  
+  // ===== CHAT DOCUMENT ANALYSIS =====
+  case “ANALYZE_CHAT_DOCUMENT”:
+  result = analyzeChatDocument(data.text, data.fileName, data.fileType, data.user);
+  break;
+  
+  // ===== CREATE CHECKLIST FROM DOCUMENT =====
+  case “CREATE_CHECKLIST_FROM_DOCUMENT”:
+  result = createChecklistFromDocument(data.workflowId, data.extracted, data.documentRef, data.fileName, data.user);
+  break;
+  
+  // ===== UPDATE RULES FROM DOCUMENT =====
+  case “UPDATE_RULES_FROM_DOCUMENT”:
+  result = updateRulesFromDocument(data.ruleType, data.changes, data.country, data.documentRef, data.fileName, data.user);
+  break;
+  
+  // ===== USER MANAGEMENT =====
+  case “LOGIN”:
+  result = loginUser(data.username, data.password);
+  break;
+  case “REGISTER”:
+  result = registerUser(data.username, data.password, data.displayName);
+  break;
+  case “GET_USER”:
+  result = getUser(data.userId);
+  break;
+  case “UPDATE_USER”:
+  result = updateUser(data.userId, data.updates);
+  break;
+  case “GET_ALL_USERS”:
+  result = getAllUsers();
+  break;
+  
+  // ===== GAMIFICATION =====
+  case “UPDATE_USER_PROGRESS”:
+  result = updateUserProgress(data.userId, data.xp, data.coins, data.badges);
+  break;
+  case “GET_LEADERBOARD”:
+  result = getLeaderboard(data.limit);
+  break;
+  case “GET_QUIZZES”:
+  result = getQuizzes(data.filters);
+  break;
+  case “CREATE_QUIZ”:
+  result = createQuiz(data.quiz, data.userId);
+  break;
+  case “UPDATE_QUIZ_STATS”:
+  result = updateQuizStats(data.quizId, data.correct);
+  break;
+  
+  // ===== GOOGLE DRIVE (Simple Backup) =====
+  case “UPLOAD_TO_DRIVE”:
+  result = uploadFileToDrive(data.fileName, data.fileContent, data.fileType, data.userId);
+  break;
+  
+  default:
+  result = { success: false, error: “Unknown action: “ + action };
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify(result))
+  .setMimeType(ContentService.MimeType.JSON);
+
+} catch (error) {
+return ContentService.createTextOutput(JSON.stringify({
+success: false,
+error: error.message,
+stack: error.stack
+})).setMimeType(ContentService.MimeType.JSON);
+}
+}
+
+// ============================================================
+// INITIALIZATION FUNCTIONS
+// ============================================================
+
+/**
+
+- Initialize all sheets
+  */
+  function initAllSheets() {
+  initConfigSheets();
+  initSignatureSheets();
+  initAuditSheet();
+  return { success: true, message: “All sheets initialized” };
+  }
+
+/**
+
+- Initialize configuration sheets
+  */
+  function initConfigSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+// Config sheet
+let configSheet = ss.getSheetByName(CONFIG.SHEETS.CONFIG);
+if (!configSheet) {
+configSheet = ss.insertSheet(CONFIG.SHEETS.CONFIG);
+configSheet.getRange(1, 1, 1, 5).setValues([[“Key”, “Value”, “Description”, “UpdatedBy”, “UpdatedAt”]]);
+configSheet.getRange(1, 1, 1, 5).setFontWeight(“bold”).setBackground(”#4285f4”).setFontColor(“white”);
+configSheet.setFrozenRows(1);
+}
+
+// Countries sheet
+let countriesSheet = ss.getSheetByName(CONFIG.SHEETS.COUNTRIES);
+if (!countriesSheet) {
+countriesSheet = ss.insertSheet(CONFIG.SHEETS.COUNTRIES);
+countriesSheet.getRange(1, 1, 1, 8).setValues([[“CountryCode”, “CountryName”, “Region”, “Currency”, “ExchangeRate”, “Active”, “UpdatedBy”, “UpdatedAt”]]);
+countriesSheet.getRange(1, 1, 1, 8).setFontWeight(“bold”).setBackground(”#34a853”).setFontColor(“white”);
+countriesSheet.setFrozenRows(1);
+
+```
+// Add default countries
+const defaultCountries = [
+  ["AU", "Australia", "APAC", "AUD", 0.65, "TRUE", "System", new Date().toISOString()],
+  ["NZ", "New Zealand", "APAC", "NZD", 0.60, "TRUE", "System", new Date().toISOString()],
+  ["SG", "Singapore", "APAC", "SGD", 0.74, "TRUE", "System", new Date().toISOString()],
+  ["MY", "Malaysia", "APAC", "MYR", 0.21, "TRUE", "System", new Date().toISOString()],
+  ["ID", "Indonesia", "APAC", "IDR", 0.000063, "TRUE", "System", new Date().toISOString()]
+];
+countriesSheet.getRange(2, 1, defaultCountries.length, 8).setValues(defaultCountries);
+```
+
+}
+
+// Approvers sheet
+let approversSheet = ss.getSheetByName(CONFIG.SHEETS.APPROVERS);
+if (!approversSheet) {
+approversSheet = ss.insertSheet(CONFIG.SHEETS.APPROVERS);
+approversSheet.getRange(1, 1, 1, 10).setValues([[“ApproverID”, “FirstName”, “LastName”, “Email”, “Country”, “Level”, “Department”, “Title”, “Active”, “UpdatedAt”]]);
+approversSheet.getRange(1, 1, 1, 10).setFontWeight(“bold”).setBackground(”#fbbc04”).setFontColor(“black”);
+approversSheet.setFrozenRows(1);
+}
+
+// Thresholds sheet
+let thresholdsSheet = ss.getSheetByName(CONFIG.SHEETS.THRESHOLDS);
+if (!thresholdsSheet) {
+thresholdsSheet = ss.insertSheet(CONFIG.SHEETS.THRESHOLDS);
+thresholdsSheet.getRange(1, 1, 1, 7).setValues([[“Country”, “ThresholdType”, “Stage”, “Amount”, “Currency”, “Approver”, “UpdatedAt”]]);
+thresholdsSheet.getRange(1, 1, 1, 7).setFontWeight(“bold”).setBackground(”#ea4335”).setFontColor(“white”);
+thresholdsSheet.setFrozenRows(1);
+
+```
+// Add default thresholds for Australia
+const defaultThresholds = [
+  ["Australia", "TAX_REVIEW", "", 3000000, "AUD", "Tax Team", new Date().toISOString()],
+  ["Australia", "JV_APPROVAL", "", 5000000, "AUD", "JV Partners", new Date().toISOString()],
+  ["Australia", "OBO_THRESHOLD", "PRE", 2500000, "AUD", "JV/OBO Partners", new Date().toISOString()],
+  ["Australia", "OBO_THRESHOLD", "APR", 5000000, "AUD", "JV/OBO Partners", new Date().toISOString()],
+  ["Australia", "OBO_THRESHOLD", "DEV", 5000000, "AUD", "JV/OBO Partners", new Date().toISOString()],
+  ["Australia", "OBO_THRESHOLD", "PRD", 5000000, "AUD", "JV/OBO Partners", new Date().toISOString()]
+];
+thresholdsSheet.getRange(2, 1, defaultThresholds.length, 7).setValues(defaultThresholds);
+```
+
+}
+
+return { success: true, message: “Config sheets initialized” };
+}
+
+/**
+
+- Initialize signature tracking sheets
+  */
+  function initSignatureSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+// Forms sheet
+let formsSheet = ss.getSheetByName(CONFIG.SHEETS.FORMS);
+if (!formsSheet) {
+formsSheet = ss.insertSheet(CONFIG.SHEETS.FORMS);
+formsSheet.getRange(1, 1, 1, 10).setValues([[
+“FormID”, “FormType”, “ProjectName”, “TotalBudget”, “Currency”,
+“Status”, “CreatedBy”, “CreatedAt”, “CompletedAt”, “Country”
+]]);
+formsSheet.getRange(1, 1, 1, 10).setFontWeight(“bold”).setBackground(”#4285f4”).setFontColor(“white”);
+formsSheet.setFrozenRows(1);
+}
+
+// Signatures sheet
+let sigSheet = ss.getSheetByName(CONFIG.SHEETS.SIGNATURES);
+if (!sigSheet) {
+sigSheet = ss.insertSheet(CONFIG.SHEETS.SIGNATURES);
+sigSheet.getRange(1, 1, 1, 12).setValues([[
+“SignatureID”, “FormID”, “BoxID”, “Label”, “Role”, “Required”,
+“Status”, “SignedBy”, “SignedByEmail”, “SignedAt”, “IPAddress”, “Comments”
+]]);
+sigSheet.getRange(1, 1, 1, 12).setFontWeight(“bold”).setBackground(”#34a853”).setFontColor(“white”);
+sigSheet.setFrozenRows(1);
+}
+
+return { success: true, message: “Signature sheets initialized” };
+}
+
+/**
+
+- Initialize audit log sheet
+  */
+  function initAuditSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+let auditSheet = ss.getSheetByName(CONFIG.SHEETS.AUDIT_LOG);
+if (!auditSheet) {
+auditSheet = ss.insertSheet(CONFIG.SHEETS.AUDIT_LOG);
+auditSheet.getRange(1, 1, 1, 6).setValues([[“Timestamp”, “Action”, “User”, “Details”, “IP”, “Status”]]);
+auditSheet.getRange(1, 1, 1, 6).setFontWeight(“bold”).setBackground(”#9c27b0”).setFontColor(“white”);
+auditSheet.setFrozenRows(1);
+}
+
+return { success: true, message: “Audit sheet initialized” };
+}
+
+// ============================================================
+// CONFIGURATION FUNCTIONS
+// ============================================================
+
+/**
+
+- Get configuration for a country
+  */
+  function getConfig(country) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+// Get thresholds
+const thresholdsSheet = ss.getSheetByName(CONFIG.SHEETS.THRESHOLDS);
+const thresholdsData = thresholdsSheet ? thresholdsSheet.getDataRange().getValues() : [];
+
+const thresholds = [];
+for (let i = 1; i < thresholdsData.length; i++) {
+if (!country || thresholdsData[i][0] === country) {
+thresholds.push({
+country: thresholdsData[i][0],
+type: thresholdsData[i][1],
+stage: thresholdsData[i][2],
+amount: thresholdsData[i][3],
+currency: thresholdsData[i][4],
+approver: thresholdsData[i][5]
+});
+}
+}
+
+return { success: true, thresholds: thresholds };
+}
+
+/**
+
+- Save configuration
+  */
+  function saveConfig(country, config) {
+  // Implementation for saving config
+  return { success: true, message: “Config saved” };
+  }
+
+/**
+
+- Get all countries
+  */
+  function getCountries() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.COUNTRIES);
+
+if (!sheet) {
+return { success: false, error: “Countries sheet not found” };
+}
+
+const data = sheet.getDataRange().getValues();
+const countries = [];
+
+for (let i = 1; i < data.length; i++) {
+countries.push({
+code: data[i][0],
+name: data[i][1],
+region: data[i][2],
+currency: data[i][3],
+exchangeRate: data[i][4],
+active: data[i][5] === “TRUE”
+});
+}
+
+return { success: true, countries: countries };
+}
+
+/**
+
+- Get approvers by level and/or country
+  */
+  function getApprovers(level, country) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.APPROVERS);
+
+if (!sheet) {
+return { success: false, error: “Approvers sheet not found” };
+}
+
+const data = sheet.getDataRange().getValues();
+const approvers = [];
+
+for (let i = 1; i < data.length; i++) {
+const matchLevel = !level || data[i][5] == level;
+const matchCountry = !country || data[i][4] === country || data[i][4] === “Global”;
+
+```
+if (matchLevel && matchCountry && data[i][8] === "TRUE") {
+  approvers.push({
+    id: data[i][0],
+    firstName: data[i][1],
+    lastName: data[i][2],
+    email: data[i][3],
+    country: data[i][4],
+    level: data[i][5],
+    department: data[i][6],
+    title: data[i][7]
+  });
+}
+```
+
+}
+
+return { success: true, approvers: approvers };
+}
+
+/**
+
+- Get thresholds for a country
+  */
+  function getThresholds(country) {
+  return getConfig(country);
+  }
+
+// ============================================================
+// FORM MANAGEMENT FUNCTIONS
+// ============================================================
+
+/**
+
+- Create a new form with signature boxes
+  */
+  function createForm(data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const formsSheet = ss.getSheetByName(CONFIG.SHEETS.FORMS);
+  const sigSheet = ss.getSheetByName(CONFIG.SHEETS.SIGNATURES);
+
+if (!formsSheet || !sigSheet) {
+return { success: false, error: “Sheets not initialized. Run initAllSheets first.” };
+}
+
+// Generate Form ID
+const formId = data.formType + “-” + new Date().getFullYear() + “-” + String(formsSheet.getLastRow()).padStart(3, “0”);
+const now = new Date().toISOString();
+
+// Add form record
+formsSheet.appendRow([
+formId,
+data.formType || “AFE”,
+data.projectName,
+data.totalBudget || 0,
+data.currency || “AUD”,
+“pending_review”,
+data.createdBy || Session.getActiveUser().getEmail(),
+now,
+“”, // CompletedAt
+data.country || “Australia”
+]);
+
+// Create signature boxes based on form type and budget
+const signatureBoxes = getRequiredSignatures(data.formType, data.totalBudget, data.country);
+
+signatureBoxes.forEach((box, idx) => {
+const sigId = formId + “-SIG” + String(idx + 1).padStart(2, “0”);
+sigSheet.appendRow([
+sigId,
+formId,
+box.boxId,
+box.label,
+box.role,
+box.required ? “TRUE” : “FALSE”,
+“pending”,
+“”, // SignedBy
+“”, // SignedByEmail
+“”, // SignedAt
+“”, // IPAddress
+“”  // Comments
+]);
+});
+
+return {
+success: true,
+formId: formId,
+signatures: signatureBoxes.length,
+message: “Form “ + formId + “ created with “ + signatureBoxes.length + “ signature boxes”
+};
+}
+
+/**
+
+- Get required signature boxes based on form type and budget
+  */
+  function getRequiredSignatures(formType, budget, country) {
+  const boxes = [];
+
+// Standard boxes for all forms
+boxes.push({ boxId: “preparer”, label: “Prepared By”, role: “Project Manager”, required: true });
+boxes.push({ boxId: “reviewer”, label: “Reviewed By”, role: “Finance Manager”, required: true });
+
+// Budget-based approval levels
+if (budget > 0) {
+const budgetUSD = budget;
+
+```
+if (budgetUSD <= CONFIG.APPROVAL_LEVELS.LEVEL_6) {
+  boxes.push({ boxId: "level6", label: "Level 6 Approval", role: "Manager", required: true });
+} else if (budgetUSD <= CONFIG.APPROVAL_LEVELS.LEVEL_5) {
+  boxes.push({ boxId: "level6", label: "Level 6 Approval", role: "Manager", required: true });
+  boxes.push({ boxId: "level5", label: "Level 5 Approval", role: "Senior Manager", required: true });
+} else if (budgetUSD <= CONFIG.APPROVAL_LEVELS.LEVEL_4) {
+  boxes.push({ boxId: "level6", label: "Level 6 Approval", role: "Manager", required: true });
+  boxes.push({ boxId: "level5", label: "Level 5 Approval", role: "Senior Manager", required: true });
+  boxes.push({ boxId: "level4", label: "Level 4 Approval", role: "Director", required: true });
+} else if (budgetUSD <= CONFIG.APPROVAL_LEVELS.LEVEL_3) {
+  boxes.push({ boxId: "level5", label: "Level 5 Approval", role: "Senior Manager", required: true });
+  boxes.push({ boxId: "level4", label: "Level 4 Approval", role: "Director", required: true });
+  boxes.push({ boxId: "level3", label: "Level 3 Approval", role: "Senior Director", required: true });
+} else {
+  boxes.push({ boxId: "level4", label: "Level 4 Approval", role: "Director", required: true });
+  boxes.push({ boxId: "level3", label: "Level 3 Approval", role: "Senior Director", required: true });
+  boxes.push({ boxId: "level2", label: "Level 2 Approval", role: "VP", required: true });
+  boxes.push({ boxId: "level1", label: "Level 1 Approval", role: "Executive", required: true });
+}
+```
+
+}
+
+// Form-specific boxes
+if (formType === “AFE”) {
+boxes.push({ boxId: “fccr”, label: “FCCR Approval”, role: “FCCR Team”, required: true });
+}
+
+return boxes;
+}
+
+/**
+
+- Get all forms with their signature status
+  */
+  function getForms(filters) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const formsSheet = ss.getSheetByName(CONFIG.SHEETS.FORMS);
+  const sigSheet = ss.getSheetByName(CONFIG.SHEETS.SIGNATURES);
+
+if (!formsSheet || !sigSheet) {
+return { success: false, error: “Sheets not initialized” };
+}
+
+const formsData = formsSheet.getDataRange().getValues();
+const sigsData = sigSheet.getDataRange().getValues();
+
+const forms = [];
+
+for (let i = 1; i < formsData.length; i++) {
+const row = formsData[i];
+const formId = row[0];
+
+```
+if (!formId) continue;
+
+// Get signatures for this form
+const signatures = [];
+for (let j = 1; j < sigsData.length; j++) {
+  if (sigsData[j][1] === formId) {
+    signatures.push({
+      signatureId: sigsData[j][0],
+      formId: sigsData[j][1],
+      boxId: sigsData[j][2],
+      label: sigsData[j][3],
+      role: sigsData[j][4],
+      required: sigsData[j][5] === "TRUE",
+      status: sigsData[j][6],
+      signedBy: sigsData[j][7],
+      signedByEmail: sigsData[j][8],
+      signedAt: sigsData[j][9],
+      comments: sigsData[j][11]
+    });
+  }
+}
+
+forms.push({
+  id: formId,
+  formId: formId,
+  formType: row[1],
+  projectName: row[2],
+  totalBudget: row[3],
+  currency: row[4],
+  status: row[5],
+  createdBy: row[6],
+  createdAt: row[7],
+  completedAt: row[8],
+  country: row[9],
+  signatures: signatures
+});
+```
+
+}
+
+// Apply filters if provided
+let filteredForms = forms;
+if (filters) {
+if (filters.status) {
+filteredForms = filteredForms.filter(f => f.status === filters.status);
+}
+if (filters.country) {
+filteredForms = filteredForms.filter(f => f.country === filters.country);
+}
+if (filters.formType) {
+filteredForms = filteredForms.filter(f => f.formType === filters.formType);
+}
+}
+
+return { success: true, forms: filteredForms };
+}
+
+/**
+
+- Get a single form by ID
+  */
+  function getForm(formId) {
+  const result = getForms();
+  if (!result.success) return result;
+
+const form = result.forms.find(f => f.formId === formId);
+if (!form) {
+return { success: false, error: “Form not found” };
+}
+
+return { success: true, form: form };
+}
+
+/**
+
+- Update a form
+  */
+  function updateForm(formId, updates) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const formsSheet = ss.getSheetByName(CONFIG.SHEETS.FORMS);
+
+if (!formsSheet) {
+return { success: false, error: “Forms sheet not found” };
+}
+
+const data = formsSheet.getDataRange().getValues();
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][0] === formId) {
+if (updates.status) formsSheet.getRange(i + 1, 6).setValue(updates.status);
+if (updates.completedAt) formsSheet.getRange(i + 1, 9).setValue(updates.completedAt);
+return { success: true, message: “Form updated” };
+}
+}
+
+return { success: false, error: “Form not found” };
+}
+
+/**
+
+- Delete a form and its signatures
+  */
+  function deleteForm(formId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const formsSheet = ss.getSheetByName(CONFIG.SHEETS.FORMS);
+  const sigSheet = ss.getSheetByName(CONFIG.SHEETS.SIGNATURES);
+
+if (!formsSheet || !sigSheet) {
+return { success: false, error: “Sheets not found” };
+}
+
+// Delete signatures first
+const sigData = sigSheet.getDataRange().getValues();
+for (let i = sigData.length - 1; i >= 1; i–) {
+if (sigData[i][1] === formId) {
+sigSheet.deleteRow(i + 1);
+}
+}
+
+// Delete form
+const formsData = formsSheet.getDataRange().getValues();
+for (let i = 1; i < formsData.length; i++) {
+if (formsData[i][0] === formId) {
+formsSheet.deleteRow(i + 1);
+return { success: true, message: “Form deleted” };
+}
+}
+
+return { success: false, error: “Form not found” };
+}
+
+// ============================================================
+// SIGNATURE MANAGEMENT FUNCTIONS
+// ============================================================
+
+/**
+
+- Record a signature
+  */
+  function signForm(data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sigSheet = ss.getSheetByName(CONFIG.SHEETS.SIGNATURES);
+  const formsSheet = ss.getSheetByName(CONFIG.SHEETS.FORMS);
+
+if (!sigSheet || !formsSheet) {
+return { success: false, error: “Sheets not initialized” };
+}
+
+const { formId, boxId, signerName, signerEmail, comments } = data;
+
+// Find the signature row
+const sigData = sigSheet.getDataRange().getValues();
+let sigRowIndex = -1;
+
+for (let i = 1; i < sigData.length; i++) {
+if (sigData[i][1] === formId && sigData[i][2] === boxId) {
+sigRowIndex = i + 1;
+break;
+}
+}
+
+if (sigRowIndex === -1) {
+return { success: false, error: “Signature box not found” };
+}
+
+// Check if already signed
+if (sigData[sigRowIndex - 1][6] === “signed”) {
+return { success: false, error: “This box is already signed” };
+}
+
+// Update the signature
+const now = new Date().toISOString();
+sigSheet.getRange(sigRowIndex, 7).setValue(“signed”);
+sigSheet.getRange(sigRowIndex, 8).setValue(signerName);
+sigSheet.getRange(sigRowIndex, 9).setValue(signerEmail || Session.getActiveUser().getEmail());
+sigSheet.getRange(sigRowIndex, 10).setValue(now);
+sigSheet.getRange(sigRowIndex, 12).setValue(comments || “”);
+
+// Check if all required signatures are complete
+const allSigs = sigSheet.getDataRange().getValues();
+const formSigs = allSigs.filter(row => row[1] === formId);
+const allRequiredSigned = formSigs
+.filter(row => row[5] === “TRUE”)
+.every(row => row[6] === “signed”);
+
+// Update form status
+const formsData = formsSheet.getDataRange().getValues();
+for (let i = 1; i < formsData.length; i++) {
+if (formsData[i][0] === formId) {
+if (allRequiredSigned) {
+formsSheet.getRange(i + 1, 6).setValue(“completed”);
+formsSheet.getRange(i + 1, 9).setValue(now);
+} else {
+formsSheet.getRange(i + 1, 6).setValue(“in_progress”);
+}
+break;
+}
+}
+
+return {
+success: true,
+message: “Signature recorded for “ + boxId,
+allComplete: allRequiredSigned
+};
+}
+
+/**
+
+- Revoke a signature (admin only)
+  */
+  function revokeSignature(data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sigSheet = ss.getSheetByName(CONFIG.SHEETS.SIGNATURES);
+  const formsSheet = ss.getSheetByName(CONFIG.SHEETS.FORMS);
+
+if (!sigSheet || !formsSheet) {
+return { success: false, error: “Sheets not initialized” };
+}
+
+const { formId, boxId, reason } = data;
+
+// Find the signature row
+const sigData = sigSheet.getDataRange().getValues();
+let sigRowIndex = -1;
+
+for (let i = 1; i < sigData.length; i++) {
+if (sigData[i][1] === formId && sigData[i][2] === boxId) {
+sigRowIndex = i + 1;
+break;
+}
+}
+
+if (sigRowIndex === -1) {
+return { success: false, error: “Signature box not found” };
+}
+
+// Reset the signature
+sigSheet.getRange(sigRowIndex, 7).setValue(“pending”);
+sigSheet.getRange(sigRowIndex, 8).setValue(””);
+sigSheet.getRange(sigRowIndex, 9).setValue(””);
+sigSheet.getRange(sigRowIndex, 10).setValue(””);
+sigSheet.getRange(sigRowIndex, 12).setValue(“REVOKED: “ + (reason || “No reason provided”));
+
+// Update form status
+const formsData = formsSheet.getDataRange().getValues();
+for (let i = 1; i < formsData.length; i++) {
+if (formsData[i][0] === formId) {
+formsSheet.getRange(i + 1, 6).setValue(“in_progress”);
+formsSheet.getRange(i + 1, 9).setValue(””);
+break;
+}
+}
+
+return { success: true, message: “Signature revoked” };
+}
+
+/**
+
+- Get signature statistics
+  */
+  function getSignatureStats() {
+  const result = getForms();
+  if (!result.success) return result;
+
+const forms = result.forms;
+
+let totalForms = forms.length;
+let completedForms = forms.filter(f => f.status === “completed”).length;
+let pendingForms = forms.filter(f => f.status === “pending_review”).length;
+let inProgressForms = forms.filter(f => f.status === “in_progress”).length;
+
+let totalSignatures = 0;
+let signedSignatures = 0;
+let pendingSignatures = 0;
+
+forms.forEach(form => {
+(form.signatures || []).forEach(sig => {
+if (sig.required) {
+totalSignatures++;
+if (sig.status === “signed”) {
+signedSignatures++;
+} else {
+pendingSignatures++;
+}
+}
+});
+});
+
+return {
+success: true,
+stats: {
+totalForms,
+completedForms,
+pendingForms,
+inProgressForms,
+totalSignatures,
+signedSignatures,
+pendingSignatures,
+completionRate: totalSignatures > 0 ? Math.round(signedSignatures / totalSignatures * 100) : 0
+}
+};
+}
+
+/**
+
+- Get pending signatures for a specific approver
+  */
+  function getPendingForApprover(email) {
+  const result = getForms();
+  if (!result.success) return result;
+
+const pendingItems = [];
+
+result.forms.forEach(form => {
+(form.signatures || []).forEach(sig => {
+if (sig.status === “pending” && sig.required) {
+pendingItems.push({
+formId: form.formId,
+formType: form.formType,
+projectName: form.projectName,
+totalBudget: form.totalBudget,
+boxId: sig.boxId,
+label: sig.label,
+role: sig.role,
+createdAt: form.createdAt
+});
+}
+});
+});
+
+return { success: true, pendingItems };
+}
+
+// ============================================================
+// NOTIFICATION FUNCTIONS
+// ============================================================
+
+/**
+
+- Send email notification for signature request
+  */
+  function sendSignatureRequest(formId, boxId, recipientEmail) {
+  const formResult = getForm(formId);
+  if (!formResult.success) return formResult;
+
+const form = formResult.form;
+const sig = (form.signatures || []).find(s => s.boxId === boxId);
+
+if (!sig) {
+return { success: false, error: “Signature box not found” };
+}
+
+const subject = “[Action Required] Signature needed for “ + form.formId;
+const body = “Dear Approver,\n\n” +
+“A signature is required from you for the following form:\n\n” +
+“Form ID: “ + form.formId + “\n” +
+“Form Type: “ + form.formType + “\n” +
+“Project: “ + form.projectName + “\n” +
+“Budget: $” + form.totalBudget.toLocaleString() + “ “ + form.currency + “\n\n” +
+“Signature Box: “ + sig.label + “\n” +
+“Role: “ + sig.role + “\n\n” +
+“Please log in to the SAP Playbook to review and sign this document.\n\n” +
+“Thank you,\n” +
+“SAP Migration Team”;
+
+try {
+MailApp.sendEmail(recipientEmail, subject, body);
+return { success: true, message: “Email sent to “ + recipientEmail };
+} catch (error) {
+return { success: false, error: “Failed to send email: “ + error.message };
+}
+}
+
+/**
+
+- Send reminders for all pending signatures
+  */
+  function sendPendingReminders() {
+  const formsResult = getForms({ status: “in_progress” });
+  if (!formsResult.success) return formsResult;
+
+let remindersSent = 0;
+
+formsResult.forms.forEach(form => {
+(form.signatures || []).forEach(sig => {
+if (sig.status === “pending” && sig.required) {
+Logger.log(“Reminder needed for “ + form.formId + “ - “ + sig.label);
+remindersSent++;
+}
+});
+});
+
+return { success: true, remindersSent };
+}
+
+// ============================================================
+// AUDIT LOGGING FUNCTIONS
+// ============================================================
+
+/**
+
+- Log an action to the audit trail
+  */
+  function logAction(action, data) {
+  try {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const auditSheet = ss.getSheetByName(CONFIG.SHEETS.AUDIT_LOG);
+  
+  if (auditSheet) {
+  auditSheet.appendRow([
+  new Date().toISOString(),
+  action,
+  Session.getActiveUser().getEmail() || “Anonymous”,
+  JSON.stringify(data).substring(0, 500),
+  “”,
+  “Success”
+  ]);
+  }
+  } catch (e) {
+  // Silent fail for logging
+  Logger.log(“Audit log error: “ + e.message);
+  }
+  }
+
+/**
+
+- Get audit log entries
+  */
+  function getAuditLog(filters) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.AUDIT_LOG);
+
+if (!sheet) {
+return { success: false, error: “Audit log sheet not found” };
+}
+
+const data = sheet.getDataRange().getValues();
+const entries = [];
+
+for (let i = 1; i < data.length; i++) {
+entries.push({
+timestamp: data[i][0],
+action: data[i][1],
+user: data[i][2],
+details: data[i][3],
+ip: data[i][4],
+status: data[i][5]
+});
+}
+
+// Sort by timestamp descending
+entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+// Apply limit
+const limit = (filters && filters.limit) || 100;
+
+return { success: true, entries: entries.slice(0, limit) };
+}
+
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+
+/**
+
+- Test function - run this to verify setup
+  */
+  function testBackend() {
+  Logger.log(“Testing Backend…”);
+
+// Test initialization
+const initResult = initAllSheets();
+Logger.log(“Init: “ + JSON.stringify(initResult));
+
+// Test get forms
+const formsResult = getForms();
+Logger.log(“Forms: “ + JSON.stringify(formsResult));
+
+// Test stats
+const statsResult = getSignatureStats();
+Logger.log(“Stats: “ + JSON.stringify(statsResult));
+
+Logger.log(“Backend test complete!”);
+}
+
+// ============================================================
+// AI CHAT WITH GEMINI 2.5 FLASH
+// ============================================================
+
+/**
+
+- Handle chat messages using Gemini 2.5 Flash
+- @param {string} message - User’s message
+- @param {object} context - Optional context (conversation history, etc.)
+  */
+  function handleChat(message, context) {
+  try {
+  // Your Gemini API Key - Store in Script Properties for security
+  // Go to Project Settings > Script Properties > Add: GEMINI_API_KEY = your_key
+  const apiKey = PropertiesService.getScriptProperties().getProperty(‘GEMINI_API_KEY’);
+  
+  if (!apiKey) {
+  return {
+  success: false,
+  error: “Gemini API key not configured. Please add GEMINI_API_KEY in Script Properties.”
+  };
+  }
+  
+  // Gemini 2.5 Flash endpoint
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  
+  // Get country from context or default to Australia
+  const country = (context && context.country) || “Australia”;
+  
+  // Knowledge base from playbook
+  const knowledgeBase = `
+  COMPANY CODES:
+
+- 1230 = EMOP Main Entity (Business Area 6601)
+- 0495 = Secondary Entity
+- 4310 = OBO Entity (Business Area 6602)
+
+BUDGET CLASSES:
+
+- 01 = Drilling
+- 02 = Facilities
+- 03 = EMIT (requires Fund.IT ruling first)
+- XF = Decommissioning/ABEX (settles to Cost Center 490000030)
+
+WBS STRUCTURE:
+
+- Level 1: 6XX/YYNNN (e.g., 601/25001) - Planning Element (PE) only
+- Level 2: 6XX/YYNNN.01 - Both PE and Account Assignment (ACCT)
+- The “6” prefix = Australia region
+- XX = budget class, YY = year, NNN = sequence
+
+PROJECT CREATION (CJ20N):
+
+1. Open CJ20N, click “Open Number” or F5
+1. Enter Company Code (1230, 0495, or 4310)
+1. Create WBS L1 with PE indicator checked
+1. Create WBS L2 with both PE and ACCT indicators
+1. Set status to REL (Released)
+1. Verify in ZJ053
+
+BUDGET ENTRY (ZJ40):
+
+- Always enter at WBS Level 1
+- Funding Stages: AC (Advance Commitment), FF (Full Funding), SUP (Supplement)
+- Net Budget = Gross Budget x (EM Share % / 100)
+- Exchange Rate: 1.59 AUD to USD (DOAG updates Jan 1 & Jul 1)
+
+APPROVAL THRESHOLDS (Net USD):
+
+- Level 10: up to $100K
+- Level 9: up to $500K
+- Level 8: up to $1M
+- Level 7: up to $5M
+- Level 6: up to $20M
+- Level 5: up to $50M
+- Level 1-4: Unlimited
+
+KEY TRIGGERS:
+
+- Tax Review: Net > $3M AUD
+- JV Approval: Net > $5M AUD
+- FCCR: Required for ALL projects
+
+PROJECT STATUS CODES:
+
+- CRTD = Created
+- REL = Released
+- TECO = Technically Complete
+- CLSD = Closed
+
+SETTLEMENT RULES:
+
+- Transaction: KO02 (edit), KO88 (execute)
+- Capital projects settle to Asset
+- Decommissioning (XF) settles to Cost Center 490000030
+- CRITICAL: Set settlement rule BEFORE TECO status!
+
+COMMON T-CODES:
+
+- CJ20N: Project Builder
+- CJ03: Display Project
+- ZJ40: Budget Entry
+- ZJ053: Project Overview
+- KO02: Settlement Rule
+- KO88: Execute Settlement
+- ME21N/ME23N: Purchase Orders
+- MIGO: Goods Receipt
+- ML81N: Service Entry
+
+WORKFLOW OWNERSHIP (Bangkok Service Hub Transition):
+
+- Bangkok handles: Draft to Ready status transitions
+- Sydney handles: Ready to REL status transitions
+- BD-1 notifications routed to Bangkok (BKK)
+
+AVAILABLE CATEGORIES FOR RULES:
+
+1. SAP System - Regional SAP instance configuration
+1. Project Format - Naming conventions, WBS formats
+1. Budgeting - T-Codes, currency management
+1. Workflow - Approval workflows, status triggers
+1. Compliance - Local legal requirements, tax thresholds
+1. MEC Activity - Month-End close procedures
+1. QEC Activity - Quarter-End close procedures
+1. YEC Activity - Year-End close procedures
+   `;
+   
+   // PtA Assistant - flexible for any topic, not SAP-only
+   const systemPrompt = `You are a friendly, human-like PtA Assistant helping with the ${country} rollout.
+
+TONE & STYLE:
+
+- Be conversational and warm
+- Use “I” and “you”
+- Act as if you are sitting next to the user
+- DO NOT use markdown formatting like ** or ## or *
+- Use plain text, simple dashes (-) for bullets, numbers (1. 2. 3.) for steps
+- Keep responses helpful and concise
+
+CONTEXT:
+
+- You are the PtA Migration Playbook assistant
+- Tasks are being transitioned from local teams (like Sydney) to the Bangkok Service Hub
+- You help with ANYTHING - not limited to SAP topics
+- You are aware of the app layout:
+  - Left Sidebar: Smart Intake, Tasks, Signatures, Enhanced Features, Support KB, Lessons Learned, Training, SAP Quest, Countries, Analytics, Audit Trail, Admin
+  - Right Panel: AI Assistant (that’s you!)
+  - Main Area: Workflows, forms, configuration, step-by-step guides
+
+APP FEATURES YOU SHOULD SUGGEST:
+
+- When user asks about approvals/signatures/AFE forms: Suggest using the SIGNATURES module to upload and track forms
+- When user asks about creating projects: Suggest using SMART INTAKE to process documents
+- When user asks about finding information: Suggest the SUPPORT KB or use GLOBAL SEARCH (Cmd+K)
+- When user asks about tracking: Suggest the SIGNATURES module for form tracking, ANALYTICS for reports
+- When user asks about learning: Suggest the TRAINING module
+- When user mentions issues: Suggest adding to LESSONS LEARNED
+
+IMPORTANT SUGGESTIONS TO MAKE:
+
+- If user asks “have I approved X” or “where is my AFE”: Tell them to go to Signatures module to upload the form for tracking, or check if it’s already there
+- If user wants to track approvals: Suggest uploading forms to the Signatures module
+- If user is not logged in: Remind them to login first for proper tracking
+
+WHAT YOU CAN HELP WITH:
+
+- Migration processes & handover procedures
+- App navigation & features
+- Workflows & approvals
+- Document tracking & signatures
+- Country configurations
+- Troubleshooting issues
+- Any other questions!
+
+KNOWLEDGE BASE (use when relevant):
+${knowledgeBase}
+
+IMPORTANT:
+
+- You are NOT limited to SAP - help with any topic
+- ALWAYS suggest relevant playbook features when appropriate
+- Reference playbook data when relevant
+- Be friendly and supportive - you’re a teammate!
+- If you don’t know something, say so honestly`;
+  
+  // Build the request payload
+  const payload = {
+  contents: [
+  {
+  role: “user”,
+  parts: [
+  { text: systemPrompt + “\n\nUser Question: “ + message }
+  ]
+  }
+  ],
+  generationConfig: {
+  temperature: 0.7,
+  topK: 40,
+  topP: 0.95,
+  maxOutputTokens: 2048,
+  },
+  safetySettings: [
+  { category: “HARM_CATEGORY_HARASSMENT”, threshold: “BLOCK_MEDIUM_AND_ABOVE” },
+  { category: “HARM_CATEGORY_HATE_SPEECH”, threshold: “BLOCK_MEDIUM_AND_ABOVE” },
+  { category: “HARM_CATEGORY_SEXUALLY_EXPLICIT”, threshold: “BLOCK_MEDIUM_AND_ABOVE” },
+  { category: “HARM_CATEGORY_DANGEROUS_CONTENT”, threshold: “BLOCK_MEDIUM_AND_ABOVE” }
+  ]
+  };
+  
+  // If there’s conversation history, include it
+  if (context && context.history && context.history.length > 0) {
+  payload.contents = [];
+  
+  ```
+  // Add system prompt as first user message
+  payload.contents.push({
+    role: "user", 
+    parts: [{ text: systemPrompt }]
+  });
+  payload.contents.push({
+    role: "model",
+    parts: [{ text: "Hey! I'm your PtA Assistant for the " + country + " rollout. I can help you with migration processes, app navigation, or any questions you have. What can I help you with today?" }]
+  });
+  
+  // Add conversation history
+  for (const msg of context.history) {
+    payload.contents.push({
+      role: msg.role === "user" ? "user" : "model",
+      parts: [{ text: msg.content }]
+    });
+  }
+  
+  // Add current message
+  payload.contents.push({
+    role: "user",
+    parts: [{ text: message }]
+  });
+  ```
+  
+  }
+  
+  // Call Gemini API
+  const options = {
+  method: “POST”,
+  contentType: “application/json”,
+  payload: JSON.stringify(payload),
+  muteHttpExceptions: true
+  };
+  
+  const response = UrlFetchApp.fetch(url, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+  
+  if (responseCode !== 200) {
+  Logger.log(“Gemini API Error: “ + responseCode + “ - “ + responseText);
+  return {
+  success: false,
+  error: “Gemini API error: “ + responseCode,
+  details: responseText
+  };
+  }
+  
+  const result = JSON.parse(responseText);
+  
+  // Extract the response text
+  if (result.candidates && result.candidates[0] && result.candidates[0].content) {
+  const aiResponse = result.candidates[0].content.parts[0].text;
+  return {
+  success: true,
+  response: aiResponse
+  };
+  } else {
+  return {
+  success: false,
+  error: “No response from Gemini”,
+  raw: result
+  };
+  }
+  
+  } catch (error) {
+  Logger.log(“Chat Error: “ + error.message);
+  return {
+  success: false,
+  error: error.message,
+  stack: error.stack
+  };
+  }
+  }
+
+/**
+
+- Analyze document for migration rules (Librarian Mode)
+- @param {string} textContent - Document text content
+- @param {string} country - Country for the migration
+- @param {string} knowledgeBase - Current knowledge base
+  */
+  function analyzeDocument(textContent, country, knowledgeBase) {
+  try {
+  const apiKey = PropertiesService.getScriptProperties().getProperty(‘GEMINI_API_KEY’);
+  
+  if (!apiKey) {
+  return { success: false, error: “Gemini API key not configured.” };
+  }
+  
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  
+  const prompt = `ROLE: PtA MIGRATION LIBRARIAN & NAVIGATOR
+  You are the intelligent core of the PtA Migration Hub analyzing a document for the ${country || “Australia”} migration project.
+
+CURRENT KNOWLEDGE BASE (Single Version of Truth):
+${knowledgeBase || “No rules established yet.”}
+
+AVAILABLE CATEGORIES:
+
+1. SAP System - Regional SAP instance configuration
+1. Project Format - Naming conventions, WBS formats
+1. Budgeting - T-Codes, currency management
+1. Workflow - Approval workflows, status triggers
+1. Compliance - Local legal requirements, tax thresholds
+1. MEC Activity - Month-End close procedures
+1. QEC Activity - Quarter-End close procedures
+1. YEC Activity - Year-End close procedures
+
+DOCUMENT TO ANALYZE:
+${textContent}
+
+TASK: Analyze this document using LIBRARIAN MODE. Extract any migration-relevant rules or policy information.
+
+OUTPUT: Return ONLY a JSON array (no other text before or after). Each rule found should be an object in the array:
+[
+{
+“is_rule_update”: true,
+“country”: “${country || “Australia”}”,
+“category”: “one of the 8 categories above”,
+“old_rule”: “current rule from knowledge base, or empty string if new”,
+“new_rule”: “the extracted rule/policy from the document”,
+“reasoning”: “why this belongs to this category”,
+“confidence_score”: “High/Med/Low”
+}
+]
+
+If NO migration-relevant rules are found, return exactly: []
+
+IMPORTANT: Output ONLY the JSON array, nothing else. No explanations, no markdown, no code blocks.`;
+
+```
+const payload = {
+  contents: [{ role: "user", parts: [{ text: prompt }] }],
+  generationConfig: {
+    temperature: 0.3,
+    maxOutputTokens: 4096,
+  }
+};
+
+const options = {
+  method: "POST",
+  contentType: "application/json",
+  payload: JSON.stringify(payload),
+  muteHttpExceptions: true
+};
+
+const response = UrlFetchApp.fetch(url, options);
+const responseCode = response.getResponseCode();
+const responseText = response.getContentText();
+
+if (responseCode !== 200) {
+  return { success: false, error: "Gemini API error: " + responseCode };
+}
+
+const result = JSON.parse(responseText);
+
+if (result.candidates && result.candidates[0] && result.candidates[0].content) {
+  const aiResponse = result.candidates[0].content.parts[0].text;
+  
+  // Try to parse as JSON
+  try {
+    const rules = JSON.parse(aiResponse.trim());
+    return { success: true, rules: rules };
+  } catch (e) {
+    // If not valid JSON, return raw response
+    return { success: true, response: aiResponse, parseError: true };
+  }
+}
+
+return { success: false, error: "No response from Gemini" };
+```
+
+} catch (error) {
+return { success: false, error: error.message };
+}
+}
+
+/**
+
+- Analyze intake document (OCR extracted text) using Gemini
+- @param {string} text - OCR extracted text
+- @param {string} fileName - Original file name
+  */
+  function analyzeIntakeDocument(text, fileName) {
+  try {
+  const apiKey = PropertiesService.getScriptProperties().getProperty(‘GEMINI_API_KEY’);
+  
+  if (!apiKey) {
+  return { success: false, error: “Gemini API key not configured.” };
+  }
+  
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  
+  const prompt = `You are an intelligent document analyzer for the PtA Migration Playbook (SAP operations).
+
+Analyze this OCR-extracted text from a document and identify:
+
+1. What type of document is this (AFE, FCCR, Purchase Order, Invoice, Budget Request, etc.)?
+1. What SAP activity is required (Create Project, Enter Budget, Create SES, Create GR, etc.)?
+1. Extract any relevant data fields.
+
+DOCUMENT TEXT:
+${text.substring(0, 4000)}
+
+FILE NAME: ${fileName || “Unknown”}
+
+Respond ONLY with a JSON object (no markdown, no explanation):
+{
+“detected”: “ACTIVITY_CODE”,
+“summary”: “Brief description of what this document is”,
+“confidence”: 85,
+“documentType”: “AFE/FCCR/PO/Invoice/Other”,
+“extracted”: {
+“wbs”: “WBS number if found”,
+“companyCode”: “Company code if found”,
+“amount”: “Amount if found”,
+“projectName”: “Project name if found”,
+“afeNumber”: “AFE number if found”,
+“poNumber”: “PO number if found”,
+“vendor”: “Vendor name if found”,
+“date”: “Date if found”
+},
+“suggestedTasks”: [
+{“workflowId”: “CREATE_PROJECT”, “name”: “Create New Project”}
+],
+“warnings”: [“Any warnings or notes about the document”]
+}
+
+ACTIVITY CODES:
+
+- CREATE_PROJECT: New SAP project needed
+- ADD_BUDGET: Budget entry required
+- CREATE_SES: Service Entry Sheet
+- CREATE_GR: Goods Receipt
+- CHECK_STATUS: Status check only
+- SETTLEMENT: Settlement rule setup
+- UNKNOWN: Cannot determine
+
+Only include extracted fields that are actually found in the text. Remove fields with no value.`;
+
+```
+const payload = {
+  contents: [{ role: "user", parts: [{ text: prompt }] }],
+  generationConfig: {
+    temperature: 0.2,
+    maxOutputTokens: 2048,
+  }
+};
+
+const options = {
+  method: "POST",
+  contentType: "application/json",
+  payload: JSON.stringify(payload),
+  muteHttpExceptions: true
+};
+
+const response = UrlFetchApp.fetch(url, options);
+const responseCode = response.getResponseCode();
+const responseText = response.getContentText();
+
+if (responseCode !== 200) {
+  Logger.log("Gemini API Error: " + responseCode);
+  return { success: false, error: "AI analysis failed" };
+}
+
+const result = JSON.parse(responseText);
+
+if (result.candidates && result.candidates[0] && result.candidates[0].content) {
+  let aiResponse = result.candidates[0].content.parts[0].text;
+  
+  // Clean up response (remove markdown if present)
+  aiResponse = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  
+  try {
+    const parsed = JSON.parse(aiResponse);
+    return {
+      success: true,
+      ...parsed,
+      extractedText: text.substring(0, 500) + (text.length > 500 ? "..." : "")
+    };
+  } catch (parseError) {
+    Logger.log("JSON Parse Error: " + parseError.message);
+    Logger.log("Raw response: " + aiResponse);
+    return { 
+      success: false, 
+      error: "Failed to parse AI response",
+      raw: aiResponse
+    };
+  }
+}
+
+return { success: false, error: "No response from AI" };
+```
+
+} catch (error) {
+Logger.log(“Intake Analysis Error: “ + error.message);
+return { success: false, error: error.message };
+}
+}
+
+/**
+
+- Test Gemini chat function
+  */
+  function testGeminiChat() {
+  const result = handleChat(“How do I create a new project?”, {country: “Australia”});
+  Logger.log(JSON.stringify(result, null, 2));
+  }
+
+/**
+
+- Analyze document uploaded in chat - determines if Activity or Rule Update
+  */
+  function analyzeChatDocument(text, fileName, fileType, user) {
+  try {
+  const apiKey = PropertiesService.getScriptProperties().getProperty(‘GEMINI_API_KEY’);
+  
+  if (!apiKey) {
+  return { success: false, error: “Gemini API key not configured.” };
+  }
+  
+  // First, save the document for audit
+  const documentId = saveUploadedDocument(text, fileName, fileType, user);
+  
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  
+  const prompt = `You are an intelligent document analyzer for the PtA Migration Playbook (SAP operations).
+
+Analyze this document and determine:
+
+1. Is this an ACTIVITY document (AFE, FCCR, PO, Invoice, Budget Request, etc.) that requires creating a task/checklist?
+1. Is this a RULE UPDATE document (DOAG approval matrix, threshold changes, new RU codes, exchange rates, etc.) that should update playbook configuration?
+
+DOCUMENT TEXT:
+${text.substring(0, 5000)}
+
+FILE NAME: ${fileName || “Unknown”}
+
+Respond ONLY with a JSON object (no markdown):
+{
+“documentType”: “ACTIVITY” or “RULE_UPDATE” or “UNKNOWN”,
+“confidence”: 85,
+
+// If ACTIVITY document:
+“activityName”: “AFE Creation / Budget Entry / SES Creation / etc.”,
+“detected”: “CREATE_PROJECT / ADD_BUDGET / CREATE_SES / CREATE_GR / CHECK_STATUS”,
+“extracted”: {
+“wbs”: “if found”,
+“companyCode”: “if found”,
+“amount”: “if found”,
+“projectName”: “if found”,
+“afeNumber”: “if found”,
+“poNumber”: “if found”,
+“vendor”: “if found”,
+“date”: “if found”
+},
+“suggestedWorkflow”: {
+“id”: “CREATE_PROJECT”,
+“name”: “Create New Project”
+},
+
+// If RULE_UPDATE document:
+“ruleType”: “APPROVAL_THRESHOLDS / DOAG_APPROVERS / EXCHANGE_RATE / RU_CODES / COMPANY_CODES”,
+“affectedArea”: “Country Configuration / Approval Matrix / etc.”,
+“country”: “Australia / Malaysia / etc. if detected”,
+“changes”: [
+{“field”: “Level 5 Threshold”, “oldValue”: “$20M”, “newValue”: “$25M”},
+{“field”: “New Approver”, “newValue”: “John Smith - L6”}
+],
+
+// Always include:
+“summary”: “Brief description of what this document contains”
+}
+
+Only include fields relevant to the detected document type.`;
+
+```
+const payload = {
+  contents: [{ role: "user", parts: [{ text: prompt }] }],
+  generationConfig: {
+    temperature: 0.2,
+    maxOutputTokens: 2048,
+  }
+};
+
+const options = {
+  method: "POST",
+  contentType: "application/json",
+  payload: JSON.stringify(payload),
+  muteHttpExceptions: true
+};
+
+const response = UrlFetchApp.fetch(url, options);
+const responseCode = response.getResponseCode();
+
+if (responseCode !== 200) {
+  return { success: false, error: "AI analysis failed", documentId: documentId };
+}
+
+const result = JSON.parse(response.getContentText());
+
+if (result.candidates && result.candidates[0] && result.candidates[0].content) {
+  let aiResponse = result.candidates[0].content.parts[0].text;
+  aiResponse = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  
+  try {
+    const parsed = JSON.parse(aiResponse);
+    
+    // Log the analysis
+    logAuditEvent(user, "DOCUMENT_ANALYZED", documentId, {
+      fileName: fileName,
+      documentType: parsed.documentType,
+      confidence: parsed.confidence
+    });
+    
+    return {
+      success: true,
+      documentId: documentId,
+      ...parsed
+    };
+  } catch (parseError) {
+    return { success: false, error: "Failed to parse AI response", documentId: documentId };
+  }
+}
+
+return { success: false, error: "No response from AI", documentId: documentId };
+```
+
+} catch (error) {
+Logger.log(“Chat document analysis error: “ + error.message);
+return { success: false, error: error.message };
+}
+}
+
+/**
+
+- Save uploaded document for audit trail
+  */
+  function saveUploadedDocument(text, fileName, fileType, user) {
+  try {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(“UploadedDocuments”);
+  
+  if (!sheet) {
+  sheet = ss.insertSheet(“UploadedDocuments”);
+  sheet.appendRow([“DocumentID”, “FileName”, “FileType”, “UploadedBy”, “UploadedAt”, “TextPreview”, “Status”]);
+  sheet.getRange(1, 1, 1, 7).setFontWeight(“bold”);
+  }
+  
+  const documentId = “DOC-” + Date.now();
+  const preview = text.substring(0, 500) + (text.length > 500 ? “…” : “”);
+  
+  sheet.appendRow([
+  documentId,
+  fileName || “Unknown”,
+  fileType || “Unknown”,
+  user || “Unknown”,
+  new Date().toISOString(),
+  preview,
+  “ANALYZED”
+  ]);
+  
+  return documentId;
+
+} catch (error) {
+Logger.log(“Error saving document: “ + error.message);
+return “DOC-” + Date.now();
+}
+}
+
+/**
+
+- Create checklist from analyzed document
+  */
+  function createChecklistFromDocument(workflowId, extracted, documentRef, fileName, user) {
+  try {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(“Checklists”);
+  
+  if (!sheet) {
+  sheet = ss.insertSheet(“Checklists”);
+  sheet.appendRow([“ChecklistID”, “WorkflowID”, “WorkflowName”, “ExtractedData”, “DocumentRef”, “FileName”, “CreatedBy”, “CreatedAt”, “Status”, “CompletedSteps”]);
+  sheet.getRange(1, 1, 1, 10).setFontWeight(“bold”);
+  }
+  
+  const checklistId = “CHK-” + Date.now();
+  
+  // Define workflow names
+  const workflowNames = {
+  “CREATE_PROJECT”: “Create New Project”,
+  “ADD_BUDGET”: “Enter Budget”,
+  “CREATE_SES”: “Create Service Entry Sheet”,
+  “CREATE_GR”: “Create Goods Receipt”,
+  “CHECK_STATUS”: “Check Status”,
+  “SETTLEMENT”: “Settlement Rule Setup”
+  };
+  
+  const workflowName = workflowNames[workflowId] || workflowId;
+  
+  sheet.appendRow([
+  checklistId,
+  workflowId,
+  workflowName,
+  JSON.stringify(extracted || {}),
+  documentRef,
+  fileName,
+  user || “Unknown”,
+  new Date().toISOString(),
+  “IN_PROGRESS”,
+  “{}”
+  ]);
+  
+  // Log audit event
+  logAuditEvent(user, “CHECKLIST_CREATED”, checklistId, {
+  workflowId: workflowId,
+  documentRef: documentRef,
+  fileName: fileName
+  });
+  
+  // Build checklist object to return
+  const checklist = {
+  id: checklistId,
+  workflowId: workflowId,
+  name: workflowName,
+  extracted: extracted,
+  documentRef: documentRef,
+  steps: getWorkflowSteps(workflowId, extracted),
+  createdAt: new Date().toISOString()
+  };
+  
+  return {
+  success: true,
+  checklistId: checklistId,
+  checklist: checklist
+  };
+
+} catch (error) {
+Logger.log(“Error creating checklist: “ + error.message);
+return { success: false, error: error.message };
+}
+}
+
+/**
+
+- Get workflow steps with extracted data pre-filled
+  */
+  function getWorkflowSteps(workflowId, extracted) {
+  const steps = {
+  “CREATE_PROJECT”: [
+  { id: 1, title: “Open CJ20N”, description: “Launch SAP transaction CJ20N - Project Builder”, tcode: “CJ20N” },
+  { id: 2, title: “Enter Project Definition”, description: `Create project: ${extracted?.projectName || '[Enter project name]'}`, data: extracted },
+  { id: 3, title: “Create WBS Level 1”, description: `WBS: ${extracted?.wbs || '[Auto-generated]'} - Planning Element only` },
+  { id: 4, title: “Create WBS Level 2”, description: “Add account assignment element (.01)” },
+  { id: 5, title: “Set Project Status”, description: “Release project (REL status)” },
+  { id: 6, title: “Save and Document”, description: “Save project and record project number” }
+  ],
+  “ADD_BUDGET”: [
+  { id: 1, title: “Open ZJ40”, description: “Launch SAP transaction ZJ40 - Budget Entry”, tcode: “ZJ40” },
+  { id: 2, title: “Enter WBS Element”, description: `WBS: ${extracted?.wbs || '[Enter WBS]'}` },
+  { id: 3, title: “Enter Budget Amount”, description: `Amount: ${extracted?.amount ? '$' + extracted.amount : '[Enter amount]'}` },
+  { id: 4, title: “Select Budget Type”, description: “Choose appropriate budget type” },
+  { id: 5, title: “Review and Save”, description: “Verify entries and save” }
+  ],
+  “CREATE_SES”: [
+  { id: 1, title: “Open ML81N”, description: “Launch SAP transaction ML81N - Service Entry Sheet”, tcode: “ML81N” },
+  { id: 2, title: “Enter PO Number”, description: `PO: ${extracted?.poNumber || '[Enter PO number]'}` },
+  { id: 3, title: “Enter Service Details”, description: “Add service lines and quantities” },
+  { id: 4, title: “Review Amounts”, description: `Amount: ${extracted?.amount ? '$' + extracted.amount : '[Verify amount]'}` },
+  { id: 5, title: “Accept and Save”, description: “Accept SES and save” }
+  ],
+  “CREATE_GR”: [
+  { id: 1, title: “Open MIGO”, description: “Launch SAP transaction MIGO - Goods Receipt”, tcode: “MIGO” },
+  { id: 2, title: “Select GR Type”, description: “Goods Receipt for Purchase Order” },
+  { id: 3, title: “Enter PO Number”, description: `PO: ${extracted?.poNumber || '[Enter PO number]'}` },
+  { id: 4, title: “Verify Quantities”, description: “Check delivered quantities” },
+  { id: 5, title: “Post GR”, description: “Post goods receipt” }
+  ]
+  };
+
+return steps[workflowId] || [
+{ id: 1, title: “Review Document”, description: “Review the uploaded document” },
+{ id: 2, title: “Identify Requirements”, description: “Determine required actions” },
+{ id: 3, title: “Complete Task”, description: “Execute the required steps” }
+];
+}
+
+/**
+
+- Update rules/configuration from document
+  */
+  function updateRulesFromDocument(ruleType, changes, country, documentRef, fileName, user) {
+  try {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Get or create RuleUpdates sheet for history
+  let historySheet = ss.getSheetByName(“RuleUpdates”);
+  if (!historySheet) {
+  historySheet = ss.insertSheet(“RuleUpdates”);
+  historySheet.appendRow([“UpdateID”, “RuleType”, “Country”, “Changes”, “DocumentRef”, “FileName”, “UpdatedBy”, “UpdatedAt”, “Status”]);
+  historySheet.getRange(1, 1, 1, 9).setFontWeight(“bold”);
+  }
+  
+  const updateId = “RUL-” + Date.now();
+  
+  // Record the update
+  historySheet.appendRow([
+  updateId,
+  ruleType,
+  country || “All”,
+  JSON.stringify(changes || []),
+  documentRef,
+  fileName,
+  user || “Unknown”,
+  new Date().toISOString(),
+  “APPLIED”
+  ]);
+  
+  // Apply changes based on rule type
+  if (ruleType === “APPROVAL_THRESHOLDS” && changes && changes.length > 0) {
+  updateApprovalThresholds(country, changes);
+  } else if (ruleType === “DOAG_APPROVERS” && changes && changes.length > 0) {
+  updateDOAGApprovers(country, changes);
+  } else if (ruleType === “EXCHANGE_RATE” && changes && changes.length > 0) {
+  updateExchangeRate(country, changes);
+  }
+  
+  // Log audit event
+  logAuditEvent(user, “RULES_UPDATED”, updateId, {
+  ruleType: ruleType,
+  country: country,
+  changesCount: (changes || []).length,
+  documentRef: documentRef
+  });
+  
+  return {
+  success: true,
+  updateId: updateId,
+  appliedChanges: changes
+  };
+
+} catch (error) {
+Logger.log(“Error updating rules: “ + error.message);
+return { success: false, error: error.message };
+}
+}
+
+/**
+
+- Update approval thresholds
+  */
+  function updateApprovalThresholds(country, changes) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(“Thresholds”);
+
+if (!sheet) {
+sheet = ss.insertSheet(“Thresholds”);
+sheet.appendRow([“Country”, “Level”, “ACFFLimit”, “SUPLimit”, “UpdatedAt”]);
+sheet.getRange(1, 1, 1, 5).setFontWeight(“bold”);
+}
+
+changes.forEach(change => {
+// Find or create threshold row
+const data = sheet.getDataRange().getValues();
+let found = false;
+
+```
+for (let i = 1; i < data.length; i++) {
+  if (data[i][0] === country && data[i][1] === change.field) {
+    // Update existing
+    sheet.getRange(i + 1, 3).setValue(change.newValue);
+    sheet.getRange(i + 1, 5).setValue(new Date().toISOString());
+    found = true;
+    break;
+  }
+}
+
+if (!found) {
+  sheet.appendRow([country, change.field, change.newValue, "", new Date().toISOString()]);
+}
+```
+
+});
+}
+
+/**
+
+- Update DOAG approvers
+  */
+  function updateDOAGApprovers(country, changes) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(“Approvers”);
+
+if (!sheet) {
+sheet = ss.insertSheet(“Approvers”);
+sheet.appendRow([“Country”, “Level”, “Name”, “Email”, “Active”, “UpdatedAt”]);
+sheet.getRange(1, 1, 1, 6).setFontWeight(“bold”);
+}
+
+changes.forEach(change => {
+sheet.appendRow([
+country,
+change.field || “Unknown”,
+change.newValue,
+“”,
+true,
+new Date().toISOString()
+]);
+});
+}
+
+/**
+
+- Update exchange rate
+  */
+  function updateExchangeRate(country, changes) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(“Countries”);
+
+if (!sheet) return;
+
+const data = sheet.getDataRange().getValues();
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][0] === country || data[i][1] === country) {
+changes.forEach(change => {
+if (change.field.toLowerCase().includes(“exchange”) || change.field.toLowerCase().includes(“rate”)) {
+// Find exchange rate column and update
+const headers = data[0];
+const rateColIndex = headers.findIndex(h => h.toLowerCase().includes(“rate”) || h.toLowerCase().includes(“exchange”));
+if (rateColIndex >= 0) {
+sheet.getRange(i + 1, rateColIndex + 1).setValue(change.newValue);
+}
+}
+});
+break;
+}
+}
+}
+
+/**
+
+- Log audit event
+  */
+  function logAuditEvent(user, action, targetId, details) {
+  try {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(“AuditLog”);
+  
+  if (!sheet) {
+  sheet = ss.insertSheet(“AuditLog”);
+  sheet.appendRow([“Timestamp”, “User”, “Action”, “TargetID”, “Details”]);
+  sheet.getRange(1, 1, 1, 5).setFontWeight(“bold”);
+  }
+  
+  sheet.appendRow([
+  new Date().toISOString(),
+  user || “System”,
+  action,
+  targetId || “”,
+  JSON.stringify(details || {})
+  ]);
+
+} catch (error) {
+Logger.log(“Audit log error: “ + error.message);
+}
+}
+
+// ============================================================
+// USER MANAGEMENT FUNCTIONS
+// ============================================================
+
+/**
+
+- Initialize Users sheet
+  */
+  function initUsersSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+let usersSheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+if (!usersSheet) {
+usersSheet = ss.insertSheet(CONFIG.SHEETS.USERS);
+usersSheet.getRange(1, 1, 1, 12).setValues([[
+“UserID”, “Username”, “PasswordHash”, “DisplayName”, “Role”, “Email”,
+“XP”, “Coins”, “Badges”, “JoinedAt”, “LastLoginAt”, “Active”
+]]);
+usersSheet.getRange(1, 1, 1, 12).setFontWeight(“bold”);
+
+```
+// Add default admin user
+const adminId = "USR" + Date.now();
+usersSheet.appendRow([
+  adminId,
+  "admin",
+  hashPassword("admin123"),
+  "Admin User",
+  "admin",
+  "admin@company.com",
+  2500,  // XP
+  850,   // Coins
+  JSON.stringify(["early_adopter", "quiz_master", "contributor"]),
+  new Date().toISOString(),
+  "",
+  true
+]);
+
+// Add default regular users
+usersSheet.appendRow([
+  "USR" + (Date.now() + 1),
+  "john",
+  hashPassword("john123"),
+  "John Smith",
+  "user",
+  "john@company.com",
+  1200, 320,
+  JSON.stringify(["first_quiz", "5_streak"]),
+  new Date().toISOString(), "", true
+]);
+
+usersSheet.appendRow([
+  "USR" + (Date.now() + 2),
+  "sarah",
+  hashPassword("sarah123"),
+  "Sarah Lee",
+  "user",
+  "sarah@company.com",
+  800, 180,
+  JSON.stringify(["contributor"]),
+  new Date().toISOString(), "", true
+]);
+```
+
+}
+
+// Initialize Gamification sheet
+let gamSheet = ss.getSheetByName(CONFIG.SHEETS.GAMIFICATION);
+if (!gamSheet) {
+gamSheet = ss.insertSheet(CONFIG.SHEETS.GAMIFICATION);
+gamSheet.getRange(1, 1, 1, 8).setValues([[
+“UserID”, “QuizzesPlayed”, “QuizzesCreated”, “CorrectAnswers”,
+“CurrentStreak”, “BestStreak”, “AnsweredQuestions”, “UpdatedAt”
+]]);
+gamSheet.getRange(1, 1, 1, 8).setFontWeight(“bold”);
+}
+
+// Initialize Quizzes sheet
+let quizSheet = ss.getSheetByName(CONFIG.SHEETS.QUIZZES);
+if (!quizSheet) {
+quizSheet = ss.insertSheet(CONFIG.SHEETS.QUIZZES);
+quizSheet.getRange(1, 1, 1, 12).setValues([[
+“QuizID”, “Question”, “Options”, “CorrectAnswer”, “Explanation”,
+“Category”, “Difficulty”, “CreatedBy”, “XPReward”, “CoinReward”,
+“Plays”, “CorrectRate”
+]]);
+quizSheet.getRange(1, 1, 1, 12).setFontWeight(“bold”);
+
+```
+// Add default quizzes
+const defaultQuizzes = [
+  ["Q001", "What T-Code is used to create a new project in SAP?", 
+   JSON.stringify(["CJ20N", "ME21N", "VA01", "FB01"]), 0,
+   "CJ20N is the Project Builder transaction used to create and maintain project definitions and WBS elements.",
+   "FI", "easy", "admin", 10, 5, 34, 82],
+  ["Q002", "Which T-Code is used to run settlement?",
+   JSON.stringify(["KO88", "CJ30", "ME23N", "AS03"]), 0,
+   "KO88 is used to settle orders and projects.",
+   "FI", "medium", "admin", 20, 10, 28, 65],
+  ["Q003", "What must be created before setting a project to TECO status?",
+   JSON.stringify(["Budget", "Settlement Rule", "Asset Master", "Purchase Order"]), 1,
+   "A Settlement Rule must exist before TECO status.",
+   "FI", "medium", "admin", 20, 10, 22, 58]
+];
+quizSheet.getRange(2, 1, defaultQuizzes.length, 12).setValues(defaultQuizzes);
+```
+
+}
+
+return { success: true, message: “User sheets initialized” };
+}
+
+/**
+
+- Simple password hashing (for demo - use proper hashing in production)
+  */
+  function hashPassword(password) {
+  const hash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, password);
+  return hash.map(b => (‘0’ + (b & 0xFF).toString(16)).slice(-2)).join(’’);
+  }
+
+/**
+
+- Login user
+  */
+  function loginUser(username, password) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+
+if (!sheet) {
+initUsersSheet();
+sheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+}
+
+const data = sheet.getDataRange().getValues();
+const passwordHash = hashPassword(password);
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][1] === username && data[i][2] === passwordHash && data[i][11] === true) {
+// Update last login
+sheet.getRange(i + 1, 11).setValue(new Date().toISOString());
+
+```
+  // Get gamification data
+  const gamData = getUserGamification(data[i][0]);
+  
+  logAuditEvent(username, "LOGIN", data[i][0], { success: true });
+  
+  return {
+    success: true,
+    user: {
+      id: data[i][0],
+      username: data[i][1],
+      displayName: data[i][3],
+      role: data[i][4],
+      email: data[i][5],
+      xp: data[i][6],
+      coins: data[i][7],
+      badges: JSON.parse(data[i][8] || "[]"),
+      joinedAt: data[i][9],
+      ...gamData
+    }
+  };
+}
+```
+
+}
+
+logAuditEvent(username, “LOGIN_FAILED”, “”, { reason: “Invalid credentials” });
+return { success: false, error: “Invalid username or password” };
+}
+
+/**
+
+- Register new user
+  */
+  function registerUser(username, password, displayName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+
+if (!sheet) {
+initUsersSheet();
+sheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+}
+
+// Check if username exists
+const data = sheet.getDataRange().getValues();
+for (let i = 1; i < data.length; i++) {
+if (data[i][1] === username) {
+return { success: false, error: “Username already exists” };
+}
+}
+
+// Create new user
+const userId = “USR” + Date.now();
+const now = new Date().toISOString();
+
+sheet.appendRow([
+userId,
+username,
+hashPassword(password),
+displayName || username,
+“user”,  // Default role
+“”,      // Email
+0,       // XP
+50,      // Starting coins
+JSON.stringify([]),  // Badges
+now,     // Joined
+now,     // Last login
+true     // Active
+]);
+
+// Initialize gamification
+const gamSheet = ss.getSheetByName(CONFIG.SHEETS.GAMIFICATION);
+if (gamSheet) {
+gamSheet.appendRow([userId, 0, 0, 0, 0, 0, JSON.stringify([]), now]);
+}
+
+logAuditEvent(username, “REGISTER”, userId, { displayName });
+
+return {
+success: true,
+user: {
+id: userId,
+username: username,
+displayName: displayName || username,
+role: “user”,
+xp: 0,
+coins: 50,
+badges: [],
+joinedAt: now,
+quizzesPlayed: 0,
+quizzesCreated: 0,
+correctAnswers: 0,
+streak: 0,
+answeredQuestions: []
+}
+};
+}
+
+/**
+
+- Get user by ID
+  */
+  function getUser(userId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+
+if (!sheet) {
+return { success: false, error: “Users sheet not found” };
+}
+
+const data = sheet.getDataRange().getValues();
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][0] === userId) {
+const gamData = getUserGamification(userId);
+return {
+success: true,
+user: {
+id: data[i][0],
+username: data[i][1],
+displayName: data[i][3],
+role: data[i][4],
+email: data[i][5],
+xp: data[i][6],
+coins: data[i][7],
+badges: JSON.parse(data[i][8] || “[]”),
+joinedAt: data[i][9],
+…gamData
+}
+};
+}
+}
+
+return { success: false, error: “User not found” };
+}
+
+/**
+
+- Get user gamification data
+  */
+  function getUserGamification(userId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.GAMIFICATION);
+
+if (!sheet) {
+return {
+quizzesPlayed: 0,
+quizzesCreated: 0,
+correctAnswers: 0,
+streak: 0,
+answeredQuestions: []
+};
+}
+
+const data = sheet.getDataRange().getValues();
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][0] === userId) {
+return {
+quizzesPlayed: data[i][1] || 0,
+quizzesCreated: data[i][2] || 0,
+correctAnswers: data[i][3] || 0,
+streak: data[i][4] || 0,
+bestStreak: data[i][5] || 0,
+answeredQuestions: JSON.parse(data[i][6] || “[]”)
+};
+}
+}
+
+return {
+quizzesPlayed: 0,
+quizzesCreated: 0,
+correctAnswers: 0,
+streak: 0,
+answeredQuestions: []
+};
+}
+
+/**
+
+- Update user data
+  */
+  function updateUser(userId, updates) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+
+if (!sheet) {
+return { success: false, error: “Users sheet not found” };
+}
+
+const data = sheet.getDataRange().getValues();
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][0] === userId) {
+// Update allowed fields
+if (updates.displayName !== undefined) sheet.getRange(i + 1, 4).setValue(updates.displayName);
+if (updates.email !== undefined) sheet.getRange(i + 1, 6).setValue(updates.email);
+if (updates.xp !== undefined) sheet.getRange(i + 1, 7).setValue(updates.xp);
+if (updates.coins !== undefined) sheet.getRange(i + 1, 8).setValue(updates.coins);
+if (updates.badges !== undefined) sheet.getRange(i + 1, 9).setValue(JSON.stringify(updates.badges));
+
+```
+  // Role can only be updated by admin (add check if needed)
+  if (updates.role !== undefined) sheet.getRange(i + 1, 5).setValue(updates.role);
+  
+  logAuditEvent(userId, "UPDATE_USER", userId, updates);
+  
+  return { success: true, message: "User updated" };
+}
+```
+
+}
+
+return { success: false, error: “User not found” };
+}
+
+/**
+
+- Update user progress (XP, coins, badges, gamification)
+  */
+  function updateUserProgress(userId, xpDelta, coinsDelta, newBadges) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const userSheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+  const gamSheet = ss.getSheetByName(CONFIG.SHEETS.GAMIFICATION);
+
+if (!userSheet) {
+return { success: false, error: “Users sheet not found” };
+}
+
+const data = userSheet.getDataRange().getValues();
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][0] === userId) {
+// Update XP
+const newXP = (data[i][6] || 0) + (xpDelta || 0);
+userSheet.getRange(i + 1, 7).setValue(newXP);
+
+```
+  // Update coins
+  const newCoins = (data[i][7] || 0) + (coinsDelta || 0);
+  userSheet.getRange(i + 1, 8).setValue(newCoins);
+  
+  // Update badges
+  if (newBadges && newBadges.length > 0) {
+    const existingBadges = JSON.parse(data[i][8] || "[]");
+    const allBadges = [...new Set([...existingBadges, ...newBadges])];
+    userSheet.getRange(i + 1, 9).setValue(JSON.stringify(allBadges));
+  }
+  
+  return { 
+    success: true, 
+    xp: newXP, 
+    coins: newCoins,
+    message: "Progress updated" 
+  };
+}
+```
+
+}
+
+return { success: false, error: “User not found” };
+}
+
+/**
+
+- Get all users (for admin)
+  */
+  function getAllUsers() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+
+if (!sheet) {
+return { success: false, error: “Users sheet not found”, users: [] };
+}
+
+const data = sheet.getDataRange().getValues();
+const users = [];
+
+for (let i = 1; i < data.length; i++) {
+users.push({
+id: data[i][0],
+username: data[i][1],
+displayName: data[i][3],
+role: data[i][4],
+email: data[i][5],
+xp: data[i][6],
+coins: data[i][7],
+badges: JSON.parse(data[i][8] || “[]”),
+joinedAt: data[i][9],
+lastLoginAt: data[i][10],
+active: data[i][11]
+});
+}
+
+return { success: true, users };
+}
+
+/**
+
+- Get leaderboard
+  */
+  function getLeaderboard(limit) {
+  const result = getAllUsers();
+  if (!result.success) return result;
+
+const sorted = result.users
+.filter(u => u.active)
+.sort((a, b) => (b.xp || 0) - (a.xp || 0))
+.slice(0, limit || 10);
+
+return { success: true, leaderboard: sorted };
+}
+
+// ============================================================
+// QUIZ MANAGEMENT FUNCTIONS
+// ============================================================
+
+/**
+
+- Get quizzes
+  */
+  function getQuizzes(filters) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.SHEETS.QUIZZES);
+
+if (!sheet) {
+initUsersSheet();
+sheet = ss.getSheetByName(CONFIG.SHEETS.QUIZZES);
+}
+
+const data = sheet.getDataRange().getValues();
+const quizzes = [];
+
+for (let i = 1; i < data.length; i++) {
+const quiz = {
+id: data[i][0],
+question: data[i][1],
+options: JSON.parse(data[i][2] || “[]”),
+correctAnswer: data[i][3],
+explanation: data[i][4],
+category: data[i][5],
+difficulty: data[i][6],
+createdBy: data[i][7],
+xpReward: data[i][8],
+coinReward: data[i][9],
+plays: data[i][10],
+correctRate: data[i][11]
+};
+
+```
+// Apply filters
+if (filters) {
+  if (filters.category && filters.category !== "all" && quiz.category !== filters.category) continue;
+  if (filters.difficulty && filters.difficulty !== "all" && quiz.difficulty !== filters.difficulty) continue;
+}
+
+quizzes.push(quiz);
+```
+
+}
+
+return { success: true, quizzes };
+}
+
+/**
+
+- Create new quiz
+  */
+  function createQuiz(quiz, userId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.SHEETS.QUIZZES);
+
+if (!sheet) {
+initUsersSheet();
+sheet = ss.getSheetByName(CONFIG.SHEETS.QUIZZES);
+}
+
+const quizId = “Q” + Date.now();
+
+sheet.appendRow([
+quizId,
+quiz.question,
+JSON.stringify(quiz.options),
+quiz.correctAnswer,
+quiz.explanation || “”,
+quiz.category || “General”,
+quiz.difficulty || “medium”,
+userId,
+quiz.xpReward || 20,
+quiz.coinReward || 10,
+0,  // Plays
+0   // Correct rate
+]);
+
+// Update user’s quizzesCreated count
+const gamSheet = ss.getSheetByName(CONFIG.SHEETS.GAMIFICATION);
+if (gamSheet) {
+const gamData = gamSheet.getDataRange().getValues();
+for (let i = 1; i < gamData.length; i++) {
+if (gamData[i][0] === userId) {
+gamSheet.getRange(i + 1, 3).setValue((gamData[i][2] || 0) + 1);
+gamSheet.getRange(i + 1, 8).setValue(new Date().toISOString());
+break;
+}
+}
+}
+
+logAuditEvent(userId, “CREATE_QUIZ”, quizId, { question: quiz.question.substring(0, 50) });
+
+return { success: true, quizId, message: “Quiz created” };
+}
+
+/**
+
+- Update quiz stats after play
+  */
+  function updateQuizStats(quizId, correct, userId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEETS.QUIZZES);
+
+if (!sheet) {
+return { success: false, error: “Quizzes sheet not found” };
+}
+
+const data = sheet.getDataRange().getValues();
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][0] === quizId) {
+const plays = (data[i][10] || 0) + 1;
+const correctCount = Math.round((data[i][11] || 0) * (plays - 1) / 100) + (correct ? 1 : 0);
+const correctRate = Math.round((correctCount / plays) * 100);
+
+```
+  sheet.getRange(i + 1, 11).setValue(plays);
+  sheet.getRange(i + 1, 12).setValue(correctRate);
+  
+  // Update gamification if userId provided
+  if (userId) {
+    updateUserGamificationAfterQuiz(userId, quizId, correct);
+  }
+  
+  return { success: true, plays, correctRate };
+}
+```
+
+}
+
+return { success: false, error: “Quiz not found” };
+}
+
+/**
+
+- Update user gamification after quiz
+  */
+  function updateUserGamificationAfterQuiz(userId, quizId, correct) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let gamSheet = ss.getSheetByName(CONFIG.SHEETS.GAMIFICATION);
+
+if (!gamSheet) {
+gamSheet = ss.insertSheet(CONFIG.SHEETS.GAMIFICATION);
+gamSheet.getRange(1, 1, 1, 8).setValues([[
+“UserID”, “QuizzesPlayed”, “QuizzesCreated”, “CorrectAnswers”,
+“CurrentStreak”, “BestStreak”, “AnsweredQuestions”, “UpdatedAt”
+]]);
+}
+
+const data = gamSheet.getDataRange().getValues();
+let found = false;
+
+for (let i = 1; i < data.length; i++) {
+if (data[i][0] === userId) {
+found = true;
+
+```
+  // Update quizzes played
+  gamSheet.getRange(i + 1, 2).setValue((data[i][1] || 0) + 1);
+  
+  // Update correct answers and streak
+  if (correct) {
+    gamSheet.getRange(i + 1, 4).setValue((data[i][3] || 0) + 1);
+    const newStreak = (data[i][4] || 0) + 1;
+    gamSheet.getRange(i + 1, 5).setValue(newStreak);
+    if (newStreak > (data[i][5] || 0)) {
+      gamSheet.getRange(i + 1, 6).setValue(newStreak);
+    }
+  } else {
+    gamSheet.getRange(i + 1, 5).setValue(0);  // Reset streak
+  }
+  
+  // Update answered questions
+  const answered = JSON.parse(data[i][6] || "[]");
+  if (!answered.includes(quizId)) {
+    answered.push(quizId);
+    gamSheet.getRange(i + 1, 7).setValue(JSON.stringify(answered));
+  }
+  
+  gamSheet.getRange(i + 1, 8).setValue(new Date().toISOString());
+  break;
+}
+```
+
+}
+
+// Create new row if user not found
+if (!found) {
+gamSheet.appendRow([
+userId,
+1,  // Quizzes played
+0,  // Quizzes created
+correct ? 1 : 0,  // Correct answers
+correct ? 1 : 0,  // Current streak
+correct ? 1 : 0,  // Best streak
+JSON.stringify([quizId]),  // Answered questions
+new Date().toISOString()
+]);
+}
+}
+
+// ============================================================
+// GOOGLE DRIVE - SIMPLE FILE BACKUP
+// ============================================================
+
+/**
+
+- Get or create the documents folder in Google Drive
+  */
+  function getOrCreateDocumentsFolder() {
+  const folderName = CONFIG.DRIVE_FOLDER_NAME;
+  const folders = DriveApp.getFoldersByName(folderName);
+
+if (folders.hasNext()) {
+return folders.next();
+}
+
+// Create new folder
+const folder = DriveApp.createFolder(folderName);
+Logger.log(“Created new folder: “ + folderName + “ (ID: “ + folder.getId() + “)”);
+return folder;
+}
+
+/**
+
+- Simple file upload to Google Drive (backup only - no tracking sheet)
+- @param {string} fileName - Original file name
+- @param {string} fileContent - Base64 encoded file content
+- @param {string} fileType - MIME type of the file
+- @param {string} userId - ID of user uploading
+  */
+  function uploadFileToDrive(fileName, fileContent, fileType, userId) {
+  try {
+  // Get or create the documents folder
+  const folder = getOrCreateDocumentsFolder();
+  
+  // Decode base64 content
+  const decodedContent = Utilities.base64Decode(fileContent);
+  const blob = Utilities.newBlob(decodedContent, fileType || “application/octet-stream”, fileName);
+  
+  // Create file in Drive
+  const file = folder.createFile(blob);
+  const fileId = file.getId();
+  const fileUrl = file.getUrl();
+  const fileSize = file.getSize();
+  
+  // Make file viewable by anyone with link
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  
+  // Log to AuditLog (simple tracking)
+  logAuditEvent(userId, “UPLOAD_FILE”, fileId, {
+  fileName: fileName,
+  fileType: fileType,
+  fileSize: fileSize,
+  driveUrl: fileUrl
+  });
+  
+  return {
+  success: true,
+  fileName: fileName,
+  fileId: fileId,
+  driveUrl: fileUrl,
+  fileSize: fileSize,
+  message: “File uploaded to Google Drive”
+  };
+
+} catch (error) {
+Logger.log(“Upload error: “ + error.message);
+return {
+success: false,
+error: “Failed to upload file: “ + error.message
+};
+}
+}
